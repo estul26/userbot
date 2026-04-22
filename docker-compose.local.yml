@@ -1,0 +1,45 @@
+services:
+  mongo:
+    image: mongo:6.0
+    container_name: bot-mongo
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+    environment:
+      # Development only; enable auth and credentials for production deployments.
+      MONGO_INITDB_DATABASE: tg_bot_dev
+    command: ["--bind_ip", "0.0.0.0"]
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand({ ping: 1 })"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
+  app:
+    image: ${REPOSITORY_NAME:?REPOSITORY_NAME is required}:local
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ${REPOSITORY_NAME:?REPOSITORY_NAME is required}
+    restart: unless-stopped
+    depends_on:
+      mongo:
+        condition: service_healthy
+    environment:
+      APP_ENV: development
+      TELEGRAM_API_ID: ${TELEGRAM_API_ID:?TELEGRAM_API_ID is required}
+      TELEGRAM_API_HASH: ${TELEGRAM_API_HASH:?TELEGRAM_API_HASH is required}
+      TELEGRAM_PHONE: ${TELEGRAM_PHONE:?TELEGRAM_PHONE is required}
+      TELEGRAM_SESSION_PATH: /data/${REPOSITORY_NAME:?REPOSITORY_NAME is required}.session.enc
+      TELEGRAM_SESSION_PASSPHRASE: ${TELEGRAM_SESSION_PASSPHRASE:?TELEGRAM_SESSION_PASSPHRASE is required}
+      USERBOT_OWNER_ID: ${USERBOT_OWNER_ID:?USERBOT_OWNER_ID is required}
+      MONGO_URI: mongodb://mongo:27017
+      MONGO_DB: tg_bot_dev
+    volumes:
+      - ./data:/data
+
+volumes:
+  mongo_data:

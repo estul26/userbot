@@ -1,0 +1,139 @@
+name: Production Deploy
+
+on:
+  workflow_run:
+    workflows: ["Release"]
+    types:
+      - completed
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+  LOG_LEVEL: ${{ vars.LOG_LEVEL || 'info' }}
+  MONGO_DB: ${{ vars.MONGO_DB || github.event.repository.name }}
+  USERBOT_SESSION_DIR: ${{ vars.USERBOT_SESSION_DIR || format('/var/lib/{0}', github.event.repository.name) }}
+  USERBOT_SESSION_FILE: ${{ vars.USERBOT_SESSION_FILE || format('{0}.session.enc', github.event.repository.name) }}
+  APP_ENV: production
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy to VPS
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main' }}
+    permissions:
+      contents: read
+      packages: read
+
+    steps:
+      - name: Deploy container
+        uses: appleboy/ssh-action@v1.0.0
+        env:
+          IMAGE_TAG: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.event.workflow_run.head_sha }}
+          CONTAINER_NAME: ${{ github.event.repository.name }}
+          APP_ENV: ${{ env.APP_ENV }}
+          TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
+          TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
+          TELEGRAM_PHONE: ${{ secrets.TELEGRAM_PHONE }}
+          TELEGRAM_SESSION_PATH: /data/${{ env.USERBOT_SESSION_FILE }}
+          TELEGRAM_SESSION_PASSPHRASE: ${{ secrets.TELEGRAM_SESSION_PASSPHRASE }}
+          USERBOT_OWNER_ID: ${{ secrets.USERBOT_OWNER_ID }}
+          MONGO_URI: ${{ secrets.MONGO_URI }}
+          MONGO_DB: ${{ env.MONGO_DB }}
+          LOG_LEVEL: ${{ env.LOG_LEVEL }}
+          USERBOT_SESSION_DIR: ${{ env.USERBOT_SESSION_DIR }}
+          USERBOT_SESSION_FILE: ${{ env.USERBOT_SESSION_FILE }}
+          GITHUB_ACTOR: ${{ github.actor }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          port: ${{ secrets.VPS_PORT }}
+          envs: IMAGE_TAG,CONTAINER_NAME,APP_ENV,TELEGRAM_API_ID,TELEGRAM_API_HASH,TELEGRAM_PHONE,TELEGRAM_SESSION_PATH,TELEGRAM_SESSION_PASSPHRASE,USERBOT_OWNER_ID,MONGO_URI,MONGO_DB,LOG_LEVEL,USERBOT_SESSION_DIR,USERBOT_SESSION_FILE,GITHUB_ACTOR,GITHUB_TOKEN
+          script: |
+            set -eo pipefail
+
+            echo "${GITHUB_TOKEN}" | docker login ghcr.io -u "${GITHUB_ACTOR}" --password-stdin
+            docker pull "${IMAGE_TAG}"
+            mkdir -p "${USERBOT_SESSION_DIR}"
+            chmod 700 "${USERBOT_SESSION_DIR}"
+            if [ ! -f "${USERBOT_SESSION_DIR}/${USERBOT_SESSION_FILE}" ]; then
+              echo "Missing encrypted Telegram session at ${USERBOT_SESSION_DIR}/${USERBOT_SESSION_FILE}. Run the userbot with -login on the VPS before production deploy."
+              exit 1
+            fi
+
+            if docker ps -a --format '{{.Names}}' | grep -w "${CONTAINER_NAME}-old" >/dev/null; then
+              docker rm -f "${CONTAINER_NAME}-old"
+            fi
+
+            if docker ps -a --format '{{.Names}}' | grep -w "${CONTAINER_NAME}" >/dev/null; then
+              docker stop "${CONTAINER_NAME}" || true
+              docker rename "${CONTAINER_NAME}" "${CONTAINER_NAME}-old" || true
+            fi
+
+            LOG_OPT=""
+            if [ -n "${LOG_LEVEL}" ] && [ "${LOG_LEVEL}" != "info" ]; then
+              LOG_OPT="-e LOG_LEVEL=${LOG_LEVEL}"
+            fi
+
+            docker run -d \
+              --name "${CONTAINER_NAME}" \
+              --restart unless-stopped \
+              --network bridge \
+              --user "$(id -u):$(id -g)" \
+              -v "${USERBOT_SESSION_DIR}:/data" \
+              -e APP_ENV="${APP_ENV}" \
+              -e TELEGRAM_API_ID="${TELEGRAM_API_ID}" \
+              -e TELEGRAM_API_HASH="${TELEGRAM_API_HASH}" \
+              -e TELEGRAM_PHONE="${TELEGRAM_PHONE}" \
+              -e TELEGRAM_SESSION_PATH="${TELEGRAM_SESSION_PATH}" \
+              -e TELEGRAM_SESSION_PASSPHRASE="${TELEGRAM_SESSION_PASSPHRASE}" \
+              -e USERBOT_OWNER_ID="${USERBOT_OWNER_ID}" \
+              -e MONGO_URI="${MONGO_URI}" \
+              -e MONGO_DB="${MONGO_DB}" \
+              ${LOG_OPT} \
+              --log-driver json-file \
+              --log-opt max-size=10m \
+              --log-opt max-file=3 \
+              "${IMAGE_TAG}"
+
+            sleep 10
+
+            if docker ps --format '{{.Names}}' | grep -w "${CONTAINER_NAME}" >/dev/null; then
+              echo "Container started; cleaning up old release."
+              if docker ps -a --format '{{.Names}}' | grep -w "${CONTAINER_NAME}-old" >/dev/null; then
+                docker rm -f "${CONTAINER_NAME}-old"
+              fi
+            else
+              echo "Container failed to start; rolling back."
+              docker logs --tail=100 "${CONTAINER_NAME}" || true
+              docker rm -f "${CONTAINER_NAME}" || true
+              if docker ps -a --format '{{.Names}}' | grep -w "${CONTAINER_NAME}-old" >/dev/null; then
+                docker rename "${CONTAINER_NAME}-old" "${CONTAINER_NAME}"
+                docker start "${CONTAINER_NAME}"
+              fi
+              exit 1
+            fi
+
+      - name: Verify deployment
+        uses: appleboy/ssh-action@v1.0.0
+        env:
+          CONTAINER_NAME: ${{ github.event.repository.name }}
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          port: ${{ secrets.VPS_PORT }}
+          envs: CONTAINER_NAME
+          script: |
+            if docker ps --format '{{.Names}}' | grep -w "${CONTAINER_NAME}" >/dev/null; then
+              echo "Deployment is healthy."
+            else
+              echo "Deployment is not running."
+              docker logs --tail=100 "${CONTAINER_NAME}" || true
+              exit 1
+            fi

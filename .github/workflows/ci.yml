@@ -1,0 +1,59 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags:
+      - "v*"
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.25.x"
+          check-latest: true
+
+      - name: Cache Go modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      - name: Go fmt (fail on diff)
+        run: |
+          go fmt ./...
+          if ! git diff --quiet; then
+            echo "Go files are not formatted. Run 'go fmt ./...' locally."
+            git diff --stat
+            exit 1
+          fi
+
+      - name: Run tests
+        run: |
+          set -eo pipefail
+          mkdir -p artifacts
+          go test ./... | tee artifacts/go-test.log
+
+      - name: Build userbot binary
+        run: go build ./cmd/bot
+
+      - name: Upload test log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: go-test-log
+          path: artifacts/go-test.log
+          if-no-files-found: warn
