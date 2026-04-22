@@ -59,6 +59,7 @@ The release workflow publishes a commit SHA tag every time. On successful releas
 
 ```sh
 docker run --rm -it \
+  --user "$(id -u):$(id -g)" \
   -v /var/lib/YOUR_REPO:/data \
   -e APP_ENV=production \
   -e TELEGRAM_API_ID="YOUR_API_ID" \
