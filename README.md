@@ -42,7 +42,7 @@ Behavior:
 - Ignores old Telegram history from before the current process start.
 - Mirrors text replies as replies to the same original message.
 - Mirrors media messages by forwarding/copying them back into the group.
-- Requires an order-number candidate in the text/caption. The default candidate pattern is `\b[A-Za-z0-9][A-Za-z0-9_-]{5,}\b`, and the matched candidate must contain at least one digit.
+- Requires an order-number candidate in the text/caption. The default candidate pattern is `\b[A-Za-z0-9][A-Za-z0-9_-]{9,}\b`, meaning at least 10 characters, and the matched candidate must contain at least one digit.
 
 For production, add a GitHub repository variable:
 
@@ -53,7 +53,7 @@ MIRROR_BOT_MESSAGES=true
 Optional custom order pattern:
 
 ```text
-MIRROR_ORDER_PATTERN=\b[A-Za-z0-9][A-Za-z0-9_-]{5,}\b
+MIRROR_ORDER_PATTERN=\b[A-Za-z0-9][A-Za-z0-9_-]{9,}\b
 ```
 
 ## Production one-time login
@@ -125,7 +125,7 @@ Optional repository variables:
 - `MONGO_DB`, default is the repository name.
 - `LOG_LEVEL`, default is `info`.
 - `MIRROR_BOT_MESSAGES`, default is `false`.
-- `MIRROR_ORDER_PATTERN`, default is `\b[A-Za-z0-9][A-Za-z0-9_-]{5,}\b`.
+- `MIRROR_ORDER_PATTERN`, default is `\b[A-Za-z0-9][A-Za-z0-9_-]{9,}\b`.
 - `USERBOT_SESSION_DIR`, default is `/var/lib/<repository-name>`.
 - `USERBOT_SESSION_FILE`, default is `<repository-name>.session.enc`.
 

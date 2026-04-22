@@ -240,7 +240,8 @@ func TestHasOrderNumber(t *testing.T) {
 	}{
 		{name: "long numeric order", text: "1776217307", want: true},
 		{name: "mixed order", text: "[M1776217307] 永顺", want: true},
-		{name: "dash order", text: "order A-12345-Z ready", want: true},
+		{name: "dash order", text: "order A-1234567-Z ready", want: true},
+		{name: "nine character order ignored", text: "A12345678"},
 		{name: "short number ignored", text: "12345"},
 		{name: "price ignored", text: "6.83"},
 		{name: "date ignored", text: "2026-04-22"},
