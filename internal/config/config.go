@@ -24,14 +24,16 @@ const (
 	KeyMongoDB                   = "MONGO_DB"
 	KeyAppEnv                    = "APP_ENV"
 	KeyLogLevel                  = "LOG_LEVEL"
+	KeyMirrorBotMessages         = "MIRROR_BOT_MESSAGES"
 
 	// Allowed environment values.
 	EnvDevelopment = "development"
 	EnvProduction  = "production"
 
 	// Defaults for optional settings.
-	DefaultAppEnv   = EnvProduction
-	DefaultLogLevel = "info"
+	DefaultAppEnv            = EnvProduction
+	DefaultLogLevel          = "info"
+	DefaultMirrorBotMessages = false
 
 	// Recommended database names by environment.
 	DefaultMongoDBProd = "tg_bot"
@@ -114,6 +116,12 @@ var Contract = []VarSpec{
 		Default:     DefaultLogLevel,
 		Description: "Overrides default log level.",
 	},
+	{
+		Key:         KeyMirrorBotMessages,
+		Example:     "true / false",
+		Default:     "false",
+		Description: "When true, repost incoming bot-authored text messages seen in groups.",
+	},
 }
 
 // Config mirrors resolved configuration values after loading.
@@ -128,6 +136,7 @@ type Config struct {
 	MongoDB                   string
 	AppEnv                    string
 	LogLevel                  string
+	MirrorBotMessages         bool
 }
 
 // Load resolves configuration from the environment (with optional dotenv in development).
@@ -150,10 +159,18 @@ func Load() (Config, error) {
 		MongoURI:                  strings.TrimSpace(os.Getenv(KeyMongoURI)),
 		MongoDB:                   strings.TrimSpace(os.Getenv(KeyMongoDB)),
 		LogLevel:                  firstNonEmpty(strings.TrimSpace(os.Getenv(KeyLogLevel)), DefaultLogLevel),
+		MirrorBotMessages:         DefaultMirrorBotMessages,
 	}
 
 	if err := validateAppEnv(cfg.AppEnv); err != nil {
 		return Config{}, err
+	}
+	if mirrorRaw := strings.TrimSpace(os.Getenv(KeyMirrorBotMessages)); mirrorRaw != "" {
+		mirror, parseErr := strconv.ParseBool(mirrorRaw)
+		if parseErr != nil {
+			return Config{}, fmt.Errorf("invalid %s: %w", KeyMirrorBotMessages, parseErr)
+		}
+		cfg.MirrorBotMessages = mirror
 	}
 
 	missing := make([]string, 0)
@@ -236,6 +253,7 @@ func FormatRedacted(cfg Config) string {
 		"mongo_uri: " + redactMongoURI(cfg.MongoURI),
 		"mongo_db: " + cfg.MongoDB,
 		"log_level: " + cfg.LogLevel,
+		fmt.Sprintf("mirror_bot_messages: %t", cfg.MirrorBotMessages),
 	}
 
 	return strings.Join(lines, "\n")

@@ -6,7 +6,7 @@
 - Keep local development simple with Docker Compose and clear environment contracts.
 
 ## Scope
-- Included: environment config loader with validation and `-config-only` dry run; `-login` interactive Telegram user login; AES-GCM encrypted session file storage; logrus-based app logging; Mongo client manager with base indexes; MTProto update handling; user/group registration; owner-only `.ping` and `.status`; graceful shutdown.
+- Included: environment config loader with validation and `-config-only` dry run; `-login` interactive Telegram user login; AES-GCM encrypted session file storage; logrus-based app logging; Mongo client manager with base indexes; MTProto update handling; user/group registration; owner-only `.ping` and `.status`; optional group bot-message mirroring; graceful shutdown.
 
 ## Architecture Overview
 - `cmd/bot`: process bootstrap, config load, Mongo manager wiring, userbot client start/shutdown.
@@ -23,7 +23,7 @@
 - Unique indexes: `users.user_id`, `groups.chat_id`.
 
 ## Operational Notes
-- Required env: `TELEGRAM_API_ID`, `TELEGRAM_API_HASH`, `TELEGRAM_PHONE`, `TELEGRAM_SESSION_PATH`, `TELEGRAM_SESSION_PASSPHRASE`, `USERBOT_OWNER_ID`, `MONGO_URI`, `MONGO_DB`; optional `APP_ENV` and `LOG_LEVEL`.
+- Required env: `TELEGRAM_API_ID`, `TELEGRAM_API_HASH`, `TELEGRAM_PHONE`, `TELEGRAM_SESSION_PATH`, `TELEGRAM_SESSION_PASSPHRASE`, `USERBOT_OWNER_ID`, `MONGO_URI`, `MONGO_DB`; optional `APP_ENV`, `LOG_LEVEL`, and `MIRROR_BOT_MESSAGES`.
 - First run uses `go run ./cmd/bot -login` to create the encrypted session. Normal runs refuse to start if the session is missing or unauthorized.
 - Local stack: `docker compose -f docker-compose.local.yml up -d mongo` for Mongo; run the userbot with `go run ./cmd/bot`.
 - CI: `go fmt ./...`, `go test ./...`, `go build ./cmd/bot`.

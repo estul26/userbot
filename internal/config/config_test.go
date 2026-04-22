@@ -10,6 +10,7 @@ import (
 func TestLoadDefaultsAndRequired(t *testing.T) {
 	unsetEnv(t, KeyAppEnv)
 	unsetEnv(t, KeyLogLevel)
+	unsetEnv(t, KeyMirrorBotMessages)
 
 	t.Setenv(KeyTelegramAPIID, "123456")
 	t.Setenv(KeyTelegramAPIHash, "hash")
@@ -39,6 +40,10 @@ func TestLoadDefaultsAndRequired(t *testing.T) {
 
 	if cfg.LogLevel != DefaultLogLevel {
 		t.Fatalf("expected default log level %s, got %s", DefaultLogLevel, cfg.LogLevel)
+	}
+
+	if cfg.MirrorBotMessages != DefaultMirrorBotMessages {
+		t.Fatalf("expected mirror bot messages default %v, got %v", DefaultMirrorBotMessages, cfg.MirrorBotMessages)
 	}
 }
 
@@ -99,6 +104,7 @@ USERBOT_OWNER_ID=77
 MONGO_URI=mongodb://from-dotenv
 MONGO_DB=tg_bot_dev
 LOG_LEVEL=debug
+MIRROR_BOT_MESSAGES=true
 `)
 
 	if err := os.WriteFile(filepath.Join(tmpDir, ".env"), dotenvContent, 0o644); err != nil {
@@ -128,6 +134,7 @@ LOG_LEVEL=debug
 	unsetEnv(t, KeyMongoURI)
 	unsetEnv(t, KeyMongoDB)
 	unsetEnv(t, KeyLogLevel)
+	unsetEnv(t, KeyMirrorBotMessages)
 
 	cfg, err := Load()
 	if err != nil {
@@ -169,6 +176,33 @@ LOG_LEVEL=debug
 	if cfg.LogLevel != "debug" {
 		t.Fatalf("expected log level from dotenv, got %s", cfg.LogLevel)
 	}
+
+	if !cfg.MirrorBotMessages {
+		t.Fatalf("expected mirror bot messages from dotenv")
+	}
+}
+
+func TestLoadValidatesMirrorBotMessages(t *testing.T) {
+	unsetEnv(t, KeyAppEnv)
+
+	t.Setenv(KeyTelegramAPIID, "123456")
+	t.Setenv(KeyTelegramAPIHash, "hash")
+	t.Setenv(KeyTelegramPhone, "+15551234567")
+	t.Setenv(KeyTelegramSessionPath, "./data/session.enc")
+	t.Setenv(KeyTelegramSessionPassphrase, "passphrase")
+	t.Setenv(KeyUserbotOwner, "123")
+	t.Setenv(KeyMongoURI, "mongodb://localhost:27017")
+	t.Setenv(KeyMongoDB, "tg_bot")
+	t.Setenv(KeyMirrorBotMessages, "not-bool")
+
+	_, err := Load()
+	if err == nil {
+		t.Fatalf("expected invalid %s to error", KeyMirrorBotMessages)
+	}
+
+	if !strings.Contains(err.Error(), KeyMirrorBotMessages) {
+		t.Fatalf("expected error to mention %s, got %v", KeyMirrorBotMessages, err)
+	}
 }
 
 func TestLoadValidatesMongoURIFormat(t *testing.T) {
@@ -205,6 +239,7 @@ func TestFormatRedactedMasksSecrets(t *testing.T) {
 		MongoDB:                   "tg_bot",
 		AppEnv:                    EnvDevelopment,
 		LogLevel:                  "debug",
+		MirrorBotMessages:         true,
 	}
 
 	summary := FormatRedacted(cfg)
@@ -231,6 +266,10 @@ func TestFormatRedactedMasksSecrets(t *testing.T) {
 
 	if !strings.Contains(summary, "telegram_phone: ...redacted4567") {
 		t.Fatalf("expected phone to show masked suffix, got %s", summary)
+	}
+
+	if !strings.Contains(summary, "mirror_bot_messages: true") {
+		t.Fatalf("expected mirror setting in summary, got %s", summary)
 	}
 }
 

@@ -69,12 +69,13 @@ type Client struct {
 }
 
 type messageMeta struct {
-	userID    int64
-	chatID    int64
-	chatType  string
-	chatTitle string
-	text      string
-	out       bool
+	userID      int64
+	chatID      int64
+	chatType    string
+	chatTitle   string
+	text        string
+	out         bool
+	senderIsBot bool
 }
 
 func WithUserRegistrar(registrar UserRegistrar) ClientOption {
@@ -260,10 +261,11 @@ func (c *Client) handleMessage(ctx context.Context, entities tg.Entities, messag
 	}
 
 	fields := logging.Fields{
-		"event":       "userbot_update",
-		"update_type": updateType,
-		"chat_type":   meta.chatType,
-		"out":         meta.out,
+		"event":         "userbot_update",
+		"update_type":   updateType,
+		"chat_type":     meta.chatType,
+		"out":           meta.out,
+		"sender_is_bot": meta.senderIsBot,
 	}
 	if meta.userID != 0 {
 		fields["user_id"] = meta.userID
@@ -275,6 +277,24 @@ func (c *Client) handleMessage(ctx context.Context, entities tg.Entities, messag
 		fields["text"] = meta.text
 	}
 	c.logger.WithFields(fields).Info("telegram update received")
+
+	if c.shouldMirrorBotMessage(meta) {
+		if err := reply(ctx, meta.text); err != nil {
+			c.logger.WithError(err).WithFields(logging.Fields{
+				"event":   "bot_message_mirror_failed",
+				"chat_id": meta.chatID,
+				"user_id": meta.userID,
+			}).Error("failed to mirror bot message")
+			return err
+		}
+
+		c.logger.WithFields(logging.Fields{
+			"event":   "bot_message_mirrored",
+			"chat_id": meta.chatID,
+			"user_id": meta.userID,
+		}).Info("mirrored bot message")
+		return nil
+	}
 
 	if !isOwnerCommand(meta, c.cfg.UserbotOwnerID) {
 		return nil
@@ -334,6 +354,9 @@ func (c *Client) extractMessageMeta(entities tg.Entities, msg *tg.Message) messa
 	if meta.userID == 0 && msg.Out {
 		meta.userID = c.cfg.UserbotOwnerID
 	}
+	if user := entities.Users[meta.userID]; user != nil {
+		meta.senderIsBot = user.Bot
+	}
 
 	switch peer := msg.PeerID.(type) {
 	case *tg.PeerUser:
@@ -359,6 +382,14 @@ func (c *Client) extractMessageMeta(entities tg.Entities, msg *tg.Message) messa
 	}
 
 	return meta
+}
+
+func (c *Client) shouldMirrorBotMessage(meta messageMeta) bool {
+	return c.cfg.MirrorBotMessages &&
+		meta.chatType == "group" &&
+		meta.senderIsBot &&
+		!meta.out &&
+		meta.text != ""
 }
 
 func peerUserID(peer tg.PeerClass) int64 {

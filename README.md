@@ -19,7 +19,7 @@ Required env vars:
 - `USERBOT_OWNER_ID`: Telegram user ID that must match the authenticated account.
 - `MONGO_URI`, `MONGO_DB`.
 
-Optional env vars: `APP_ENV` (`production` default, `development` enables `.env`) and `LOG_LEVEL`.
+Optional env vars: `APP_ENV` (`production` default, `development` enables `.env`), `LOG_LEVEL`, and `MIRROR_BOT_MESSAGES`.
 
 ## Local development
 - Start MongoDB: `docker compose -f docker-compose.local.yml up -d mongo`.
@@ -31,6 +31,21 @@ Optional env vars: `APP_ENV` (`production` default, `development` enables `.env`
 Owner commands are sent from your own Telegram account in any chat:
 - `.ping`
 - `.status`
+
+## Bot message mirroring
+Set `MIRROR_BOT_MESSAGES=true` to repost incoming bot-authored text messages in group/supergroup chats.
+
+Behavior:
+- Only mirrors messages where the sender is a Telegram bot.
+- Only mirrors group/supergroup messages.
+- Ignores your own outgoing messages, so the userbot does not mirror itself.
+- Mirrors text only; media/captions are not copied in this version.
+
+For production, add a GitHub repository variable:
+
+```text
+MIRROR_BOT_MESSAGES=true
+```
 
 ## Production one-time login
 Production deploys do not perform Telegram login automatically. Login is a one-time manual step on the VPS that creates an encrypted session file. The normal production container then reuses that file.
@@ -100,6 +115,7 @@ Optional repository variables:
 
 - `MONGO_DB`, default is the repository name.
 - `LOG_LEVEL`, default is `info`.
+- `MIRROR_BOT_MESSAGES`, default is `false`.
 - `USERBOT_SESSION_DIR`, default is `/var/lib/<repository-name>`.
 - `USERBOT_SESSION_FILE`, default is `<repository-name>.session.enc`.
 

@@ -38,6 +38,7 @@ services:
       USERBOT_OWNER_ID: ${USERBOT_OWNER_ID:?USERBOT_OWNER_ID is required}
       MONGO_URI: mongodb://mongo:27017
       MONGO_DB: tg_bot_dev
+      MIRROR_BOT_MESSAGES: ${MIRROR_BOT_MESSAGES:-false}
     volumes:
       - ./data:/data
 

@@ -129,6 +129,82 @@ func TestCommandResponsesSurfaceDependencyErrors(t *testing.T) {
 	}
 }
 
+func TestShouldMirrorBotMessage(t *testing.T) {
+	client := &Client{cfg: config.Config{MirrorBotMessages: true}}
+
+	tests := []struct {
+		name string
+		meta messageMeta
+		want bool
+	}{
+		{
+			name: "incoming bot text in group",
+			meta: messageMeta{chatType: "group", senderIsBot: true, text: "hello"},
+			want: true,
+		},
+		{
+			name: "feature disabled",
+			meta: messageMeta{chatType: "group", senderIsBot: true, text: "hello"},
+			want: false,
+		},
+		{
+			name: "human message ignored",
+			meta: messageMeta{chatType: "group", text: "hello"},
+			want: false,
+		},
+		{
+			name: "outgoing bot-like message ignored",
+			meta: messageMeta{chatType: "group", senderIsBot: true, out: true, text: "hello"},
+			want: false,
+		},
+		{
+			name: "private bot message ignored",
+			meta: messageMeta{chatType: "private", senderIsBot: true, text: "hello"},
+			want: false,
+		},
+		{
+			name: "empty text ignored",
+			meta: messageMeta{chatType: "group", senderIsBot: true},
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.name == "feature disabled" {
+				client = &Client{}
+			} else {
+				client = &Client{cfg: config.Config{MirrorBotMessages: true}}
+			}
+			if got := client.shouldMirrorBotMessage(tt.meta); got != tt.want {
+				t.Fatalf("expected %v, got %v", tt.want, got)
+			}
+		})
+	}
+}
+
+func TestExtractMessageMetaDetectsBotSender(t *testing.T) {
+	client := &Client{}
+	msg := &tg.Message{
+		PeerID:  &tg.PeerChat{ChatID: 200},
+		Message: "bot says hi",
+	}
+	msg.SetFromID(&tg.PeerUser{UserID: 100})
+
+	meta := client.extractMessageMeta(tg.Entities{
+		Users: map[int64]*tg.User{
+			100: {ID: 100, Bot: true},
+		},
+	}, msg)
+
+	if !meta.senderIsBot {
+		t.Fatalf("expected sender to be detected as bot")
+	}
+	if meta.chatType != "group" || meta.chatID != 200 || meta.userID != 100 {
+		t.Fatalf("unexpected metadata: %+v", meta)
+	}
+}
+
 func TestInputPeerFromPeerAllowsBasicGroupWithoutEntity(t *testing.T) {
 	inputPeer, err := inputPeerFromPeer(tg.Entities{}, &tg.PeerChat{ChatID: 4750561458})
 	if err != nil {
