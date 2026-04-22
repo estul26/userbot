@@ -53,7 +53,9 @@ The deploy workflow expects this file to exist after login:
 ```
 
 ### 2. Run interactive login once
-Use the production image and run it with `-login`. Replace the placeholder values before running:
+Use a production image that already exists in GHCR and run it with `-login`. Replace the placeholder values before running.
+
+The release workflow publishes a commit SHA tag every time. On successful releases from `main`, it also publishes `main` and `latest` tags. If `latest` does not exist yet, use `main` or the commit SHA tag from the successful release:
 
 ```sh
 docker run --rm -it \
@@ -67,7 +69,7 @@ docker run --rm -it \
   -e USERBOT_OWNER_ID="YOUR_TELEGRAM_USER_ID" \
   -e MONGO_URI="YOUR_PRODUCTION_MONGO_URI" \
   -e MONGO_DB="tg_bot" \
-  ghcr.io/YOUR_GITHUB_USERNAME/YOUR_REPO:latest \
+  ghcr.io/YOUR_GITHUB_USERNAME/YOUR_REPO:main \
   -login
 ```
 
