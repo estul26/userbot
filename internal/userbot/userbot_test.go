@@ -47,6 +47,16 @@ func (f *fakeTelegramUserGetter) UsersGetUsers(_ context.Context, id []tg.InputU
 	return f.users, f.err
 }
 
+type fakeTelegramMessageForwarder struct {
+	requests []*tg.MessagesForwardMessagesRequest
+	err      error
+}
+
+func (f *fakeTelegramMessageForwarder) MessagesForwardMessages(_ context.Context, request *tg.MessagesForwardMessagesRequest) (tg.UpdatesClass, error) {
+	f.requests = append(f.requests, request)
+	return &tg.Updates{}, f.err
+}
+
 func TestOwnerCommandRecognition(t *testing.T) {
 	tests := []struct {
 		name string
@@ -154,6 +164,11 @@ func TestShouldMirrorBotMessage(t *testing.T) {
 			want: true,
 		},
 		{
+			name: "incoming bot media in group",
+			meta: messageMeta{chatType: "group", senderIsBot: true, hasMedia: true},
+			want: true,
+		},
+		{
 			name: "feature disabled",
 			meta: messageMeta{chatType: "group", senderIsBot: true, text: "hello"},
 			want: false,
@@ -174,7 +189,7 @@ func TestShouldMirrorBotMessage(t *testing.T) {
 			want: false,
 		},
 		{
-			name: "empty text ignored",
+			name: "empty content ignored",
 			meta: messageMeta{chatType: "group", senderIsBot: true},
 			want: false,
 		},
@@ -213,6 +228,24 @@ func TestExtractMessageMetaDetectsBotSender(t *testing.T) {
 	}
 	if meta.chatType != "group" || meta.chatID != 200 || meta.userID != 100 {
 		t.Fatalf("unexpected metadata: %+v", meta)
+	}
+}
+
+func TestExtractMessageMetaDetectsMedia(t *testing.T) {
+	client := &Client{}
+	msg := &tg.Message{
+		PeerID: &tg.PeerChat{ChatID: 200},
+		Media:  &tg.MessageMediaPhoto{},
+	}
+	msg.SetFromID(&tg.PeerUser{UserID: 100})
+
+	meta := client.extractMessageMeta(tg.Entities{}, msg)
+
+	if !meta.hasMedia {
+		t.Fatalf("expected media to be detected")
+	}
+	if !meta.hasMirrorableContent() {
+		t.Fatalf("expected media-only message to be mirrorable")
 	}
 }
 
@@ -270,6 +303,46 @@ func TestResolveMessageSenderBotUsesCache(t *testing.T) {
 	}
 	if len(getter.ids) != 0 {
 		t.Fatalf("expected no telegram lookup when cache exists, got %d", len(getter.ids))
+	}
+}
+
+func TestForwardMessageToSamePeerDropsAuthor(t *testing.T) {
+	forwarder := &fakeTelegramMessageForwarder{}
+	msg := &tg.Message{
+		ID:     55,
+		PeerID: &tg.PeerChat{ChatID: 200},
+	}
+
+	if err := forwardMessageToSamePeer(context.Background(), forwarder, tg.Entities{}, msg); err != nil {
+		t.Fatalf("expected forward to succeed: %v", err)
+	}
+	if len(forwarder.requests) != 1 {
+		t.Fatalf("expected one forward request, got %d", len(forwarder.requests))
+	}
+
+	request := forwarder.requests[0]
+	fromPeer, ok := request.FromPeer.(*tg.InputPeerChat)
+	if !ok {
+		t.Fatalf("expected FromPeer InputPeerChat, got %T", request.FromPeer)
+	}
+	toPeer, ok := request.ToPeer.(*tg.InputPeerChat)
+	if !ok {
+		t.Fatalf("expected ToPeer InputPeerChat, got %T", request.ToPeer)
+	}
+	if fromPeer.ChatID != 200 || toPeer.ChatID != 200 {
+		t.Fatalf("expected same chat peer, got from=%+v to=%+v", fromPeer, toPeer)
+	}
+	if len(request.ID) != 1 || request.ID[0] != 55 {
+		t.Fatalf("expected message id 55, got %+v", request.ID)
+	}
+	if len(request.RandomID) != 1 || request.RandomID[0] == 0 {
+		t.Fatalf("expected non-zero random id, got %+v", request.RandomID)
+	}
+	if !request.GetDropAuthor() {
+		t.Fatalf("expected forwarded message to drop original author")
+	}
+	if request.GetDropMediaCaptions() {
+		t.Fatalf("expected media captions to be preserved")
 	}
 }
 

@@ -50,6 +50,15 @@ type telegramUserGetter interface {
 	UsersGetUsers(ctx context.Context, id []tg.InputUserClass) ([]tg.UserClass, error)
 }
 
+type telegramMessageForwarder interface {
+	MessagesForwardMessages(ctx context.Context, request *tg.MessagesForwardMessagesRequest) (tg.UpdatesClass, error)
+}
+
+type telegramAPI interface {
+	telegramUserGetter
+	telegramMessageForwarder
+}
+
 type ClientOption func(*clientOptions)
 
 type clientOptions struct {
@@ -83,6 +92,7 @@ type messageMeta struct {
 	text        string
 	out         bool
 	senderIsBot bool
+	hasMedia    bool
 }
 
 func WithUserRegistrar(registrar UserRegistrar) ClientOption {
@@ -253,14 +263,14 @@ func (c *Client) Start(ctx context.Context) error {
 	return nil
 }
 
-func (c *Client) handleMessage(ctx context.Context, userGetter telegramUserGetter, entities tg.Entities, messageClass tg.MessageClass, updateType string, reply func(context.Context, string) error) error {
+func (c *Client) handleMessage(ctx context.Context, api telegramAPI, entities tg.Entities, messageClass tg.MessageClass, updateType string, reply func(context.Context, string) error) error {
 	msg, ok := messageClass.(*tg.Message)
 	if !ok || msg == nil {
 		return nil
 	}
 
 	meta := c.extractMessageMeta(entities, msg)
-	if err := c.resolveMessageSenderBot(ctx, userGetter, entities, msg, &meta); err != nil {
+	if err := c.resolveMessageSenderBot(ctx, api, entities, msg, &meta); err != nil {
 		c.logger.WithError(err).WithFields(logging.Fields{
 			"event":   "bot_sender_lookup_failed",
 			"chat_id": meta.chatID,
@@ -294,7 +304,7 @@ func (c *Client) handleMessage(ctx context.Context, userGetter telegramUserGette
 	c.logger.WithFields(fields).Info("telegram update received")
 
 	if c.shouldMirrorBotMessage(meta) {
-		if err := reply(ctx, meta.text); err != nil {
+		if err := forwardMessageToSamePeer(ctx, api, entities, messageClass); err != nil {
 			c.logger.WithError(err).WithFields(logging.Fields{
 				"event":   "bot_message_mirror_failed",
 				"chat_id": meta.chatID,
@@ -359,8 +369,9 @@ func (c *Client) registerSeen(ctx context.Context, meta messageMeta) error {
 
 func (c *Client) extractMessageMeta(entities tg.Entities, msg *tg.Message) messageMeta {
 	meta := messageMeta{
-		text: strings.TrimSpace(msg.Message),
-		out:  msg.Out,
+		text:     strings.TrimSpace(msg.Message),
+		out:      msg.Out,
+		hasMedia: hasMessageMedia(msg),
 	}
 
 	if from, ok := msg.GetFromID(); ok {
@@ -404,7 +415,7 @@ func (c *Client) shouldMirrorBotMessage(meta messageMeta) bool {
 		meta.chatType == "group" &&
 		meta.senderIsBot &&
 		!meta.out &&
-		meta.text != ""
+		meta.hasMirrorableContent()
 }
 
 func (c *Client) shouldLookupMessageSenderBot(meta messageMeta) bool {
@@ -412,8 +423,12 @@ func (c *Client) shouldLookupMessageSenderBot(meta messageMeta) bool {
 		meta.chatType == "group" &&
 		!meta.senderIsBot &&
 		!meta.out &&
-		meta.text != "" &&
+		meta.hasMirrorableContent() &&
 		meta.userID != 0
+}
+
+func (m messageMeta) hasMirrorableContent() bool {
+	return m.text != "" || m.hasMedia
 }
 
 func (c *Client) resolveMessageSenderBot(ctx context.Context, userGetter telegramUserGetter, entities tg.Entities, msg *tg.Message, meta *messageMeta) error {
@@ -513,6 +528,49 @@ func sendTextToMessagePeer(ctx context.Context, raw *tg.Client, entities tg.Enti
 	}
 
 	return nil
+}
+
+func forwardMessageToSamePeer(ctx context.Context, forwarder telegramMessageForwarder, entities tg.Entities, messageClass tg.MessageClass) error {
+	if forwarder == nil {
+		return errors.New("telegram message forwarder is nil")
+	}
+
+	msg, ok := messageClass.AsNotEmpty()
+	if !ok {
+		return fmt.Errorf("unexpected message type %T", messageClass)
+	}
+
+	inputPeer, err := inputPeerFromPeer(entities, msg.GetPeerID())
+	if err != nil {
+		return err
+	}
+
+	randomID, err := tdcrypto.RandInt64(rand.Reader)
+	if err != nil {
+		return fmt.Errorf("generate forward random id: %w", err)
+	}
+
+	request := &tg.MessagesForwardMessagesRequest{
+		FromPeer: inputPeer,
+		ToPeer:   inputPeer,
+		ID:       []int{msg.GetID()},
+		RandomID: []int64{randomID},
+	}
+	request.SetDropAuthor(true)
+
+	if _, err := forwarder.MessagesForwardMessages(ctx, request); err != nil {
+		return fmt.Errorf("forward message: %w", err)
+	}
+
+	return nil
+}
+
+func hasMessageMedia(msg *tg.Message) bool {
+	if msg == nil || msg.Media == nil {
+		return false
+	}
+	_, empty := msg.Media.(*tg.MessageMediaEmpty)
+	return !empty
 }
 
 func inputPeerFromMessage(entities tg.Entities, messageClass tg.MessageClass) (tg.InputPeerClass, error) {
