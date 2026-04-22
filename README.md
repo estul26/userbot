@@ -39,7 +39,8 @@ Production deploys do not perform Telegram login automatically. Login is a one-t
 SSH into the VPS and create a persistent directory for the encrypted Telegram session:
 
 ```sh
-mkdir -p /var/lib/YOUR_REPO
+sudo mkdir -p /var/lib/YOUR_REPO
+sudo chown "$(id -u):$(id -g)" /var/lib/YOUR_REPO
 chmod 700 /var/lib/YOUR_REPO
 ```
 

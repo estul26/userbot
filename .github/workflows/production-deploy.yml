@@ -59,8 +59,17 @@ jobs:
 
             echo "${GITHUB_TOKEN}" | docker login ghcr.io -u "${GITHUB_ACTOR}" --password-stdin
             docker pull "${IMAGE_TAG}"
-            mkdir -p "${USERBOT_SESSION_DIR}"
+
+            APP_UID="$(id -u)"
+            APP_GID="$(id -g)"
+            if [ ! -d "${USERBOT_SESSION_DIR}" ]; then
+              sudo install -d -m 700 -o "${APP_UID}" -g "${APP_GID}" "${USERBOT_SESSION_DIR}"
+            fi
+            if [ ! -w "${USERBOT_SESSION_DIR}" ]; then
+              sudo chown "${APP_UID}:${APP_GID}" "${USERBOT_SESSION_DIR}"
+            fi
             chmod 700 "${USERBOT_SESSION_DIR}"
+
             if [ ! -f "${USERBOT_SESSION_DIR}/${USERBOT_SESSION_FILE}" ]; then
               echo "Missing encrypted Telegram session at ${USERBOT_SESSION_DIR}/${USERBOT_SESSION_FILE}. Run the userbot with -login on the VPS before production deploy."
               exit 1
