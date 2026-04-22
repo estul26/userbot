@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	tdcrypto "github.com/gotd/td/crypto"
@@ -45,6 +46,10 @@ type StatsProvider interface {
 	CountGroups(ctx context.Context) (int64, error)
 }
 
+type telegramUserGetter interface {
+	UsersGetUsers(ctx context.Context, id []tg.InputUserClass) ([]tg.UserClass, error)
+}
+
 type ClientOption func(*clientOptions)
 
 type clientOptions struct {
@@ -66,6 +71,8 @@ type Client struct {
 	statsProvider  StatsProvider
 	loginMode      bool
 	sessionStorage *EncryptedFileSessionStorage
+	senderBotMu    sync.RWMutex
+	senderBotCache map[int64]bool
 }
 
 type messageMeta struct {
@@ -144,6 +151,7 @@ func NewClient(cfg config.Config, logger *logrus.Entry, opts ...ClientOption) (*
 		statsProvider:  clientOpts.statsProvider,
 		loginMode:      clientOpts.loginMode,
 		sessionStorage: storage,
+		senderBotCache: make(map[int64]bool),
 	}, nil
 }
 
@@ -174,12 +182,12 @@ func (c *Client) Start(ctx context.Context) error {
 	raw := tgClient.API()
 
 	dispatcher.OnNewMessage(func(ctx context.Context, entities tg.Entities, update *tg.UpdateNewMessage) error {
-		return c.handleMessage(ctx, entities, update.Message, "new_message", func(ctx context.Context, text string) error {
+		return c.handleMessage(ctx, raw, entities, update.Message, "new_message", func(ctx context.Context, text string) error {
 			return sendTextToMessagePeer(ctx, raw, entities, update.Message, text)
 		})
 	})
 	dispatcher.OnNewChannelMessage(func(ctx context.Context, entities tg.Entities, update *tg.UpdateNewChannelMessage) error {
-		return c.handleMessage(ctx, entities, update.Message, "new_channel_message", func(ctx context.Context, text string) error {
+		return c.handleMessage(ctx, raw, entities, update.Message, "new_channel_message", func(ctx context.Context, text string) error {
 			return sendTextToMessagePeer(ctx, raw, entities, update.Message, text)
 		})
 	})
@@ -245,13 +253,20 @@ func (c *Client) Start(ctx context.Context) error {
 	return nil
 }
 
-func (c *Client) handleMessage(ctx context.Context, entities tg.Entities, messageClass tg.MessageClass, updateType string, reply func(context.Context, string) error) error {
+func (c *Client) handleMessage(ctx context.Context, userGetter telegramUserGetter, entities tg.Entities, messageClass tg.MessageClass, updateType string, reply func(context.Context, string) error) error {
 	msg, ok := messageClass.(*tg.Message)
 	if !ok || msg == nil {
 		return nil
 	}
 
 	meta := c.extractMessageMeta(entities, msg)
+	if err := c.resolveMessageSenderBot(ctx, userGetter, entities, msg, &meta); err != nil {
+		c.logger.WithError(err).WithFields(logging.Fields{
+			"event":   "bot_sender_lookup_failed",
+			"chat_id": meta.chatID,
+			"user_id": meta.userID,
+		}).Warn("failed to resolve message sender bot status")
+	}
 	if err := c.registerSeen(ctx, meta); err != nil {
 		c.logger.WithError(err).WithFields(logging.Fields{
 			"event":   "userbot_registration_failed",
@@ -390,6 +405,83 @@ func (c *Client) shouldMirrorBotMessage(meta messageMeta) bool {
 		meta.senderIsBot &&
 		!meta.out &&
 		meta.text != ""
+}
+
+func (c *Client) shouldLookupMessageSenderBot(meta messageMeta) bool {
+	return c.cfg.MirrorBotMessages &&
+		meta.chatType == "group" &&
+		!meta.senderIsBot &&
+		!meta.out &&
+		meta.text != "" &&
+		meta.userID != 0
+}
+
+func (c *Client) resolveMessageSenderBot(ctx context.Context, userGetter telegramUserGetter, entities tg.Entities, msg *tg.Message, meta *messageMeta) error {
+	if meta == nil || meta.userID == 0 {
+		return nil
+	}
+	if meta.senderIsBot {
+		c.cacheSenderBot(meta.userID, true)
+		return nil
+	}
+	if cached, ok := c.cachedSenderBot(meta.userID); ok {
+		meta.senderIsBot = cached
+		return nil
+	}
+	if !c.shouldLookupMessageSenderBot(*meta) || userGetter == nil || msg == nil || msg.ID == 0 {
+		return nil
+	}
+
+	inputPeer, err := inputPeerFromPeer(entities, msg.PeerID)
+	if err != nil {
+		return fmt.Errorf("resolve sender peer: %w", err)
+	}
+
+	users, err := userGetter.UsersGetUsers(ctx, []tg.InputUserClass{
+		&tg.InputUserFromMessage{
+			Peer:   inputPeer,
+			MsgID:  msg.ID,
+			UserID: meta.userID,
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("get sender user: %w", err)
+	}
+
+	for _, userClass := range users {
+		user, ok := userClass.AsNotEmpty()
+		if !ok || user.ID != meta.userID {
+			continue
+		}
+
+		meta.senderIsBot = user.Bot
+		c.cacheSenderBot(meta.userID, user.Bot)
+		return nil
+	}
+
+	return nil
+}
+
+func (c *Client) cachedSenderBot(userID int64) (bool, bool) {
+	c.senderBotMu.RLock()
+	defer c.senderBotMu.RUnlock()
+
+	if c.senderBotCache == nil {
+		return false, false
+	}
+
+	isBot, ok := c.senderBotCache[userID]
+	return isBot, ok
+}
+
+func (c *Client) cacheSenderBot(userID int64, isBot bool) {
+	c.senderBotMu.Lock()
+	defer c.senderBotMu.Unlock()
+
+	if c.senderBotCache == nil {
+		c.senderBotCache = make(map[int64]bool)
+	}
+	c.senderBotCache[userID] = isBot
 }
 
 func peerUserID(peer tg.PeerClass) int64 {

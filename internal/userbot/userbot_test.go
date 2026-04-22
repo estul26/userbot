@@ -36,6 +36,17 @@ func (f fakeStatsProvider) CountGroups(context.Context) (int64, error) {
 	return f.groups, f.groupErr
 }
 
+type fakeTelegramUserGetter struct {
+	users []tg.UserClass
+	ids   []tg.InputUserClass
+	err   error
+}
+
+func (f *fakeTelegramUserGetter) UsersGetUsers(_ context.Context, id []tg.InputUserClass) ([]tg.UserClass, error) {
+	f.ids = id
+	return f.users, f.err
+}
+
 func TestOwnerCommandRecognition(t *testing.T) {
 	tests := []struct {
 		name string
@@ -202,6 +213,63 @@ func TestExtractMessageMetaDetectsBotSender(t *testing.T) {
 	}
 	if meta.chatType != "group" || meta.chatID != 200 || meta.userID != 100 {
 		t.Fatalf("unexpected metadata: %+v", meta)
+	}
+}
+
+func TestResolveMessageSenderBotUsesInputUserFromMessage(t *testing.T) {
+	client := &Client{cfg: config.Config{MirrorBotMessages: true}}
+	getter := &fakeTelegramUserGetter{
+		users: []tg.UserClass{
+			&tg.User{ID: 100, Bot: true},
+		},
+	}
+	msg := &tg.Message{
+		ID:      55,
+		PeerID:  &tg.PeerChat{ChatID: 200},
+		Message: "bot says hi",
+	}
+	msg.SetFromID(&tg.PeerUser{UserID: 100})
+	meta := client.extractMessageMeta(tg.Entities{}, msg)
+
+	if err := client.resolveMessageSenderBot(context.Background(), getter, tg.Entities{}, msg, &meta); err != nil {
+		t.Fatalf("expected sender lookup to succeed: %v", err)
+	}
+
+	if !meta.senderIsBot {
+		t.Fatalf("expected resolved sender to be detected as bot")
+	}
+	if len(getter.ids) != 1 {
+		t.Fatalf("expected one user lookup, got %d", len(getter.ids))
+	}
+
+	input, ok := getter.ids[0].(*tg.InputUserFromMessage)
+	if !ok {
+		t.Fatalf("expected InputUserFromMessage, got %T", getter.ids[0])
+	}
+	peer, ok := input.Peer.(*tg.InputPeerChat)
+	if !ok {
+		t.Fatalf("expected InputPeerChat, got %T", input.Peer)
+	}
+	if peer.ChatID != 200 || input.MsgID != 55 || input.UserID != 100 {
+		t.Fatalf("unexpected lookup input: %+v", input)
+	}
+}
+
+func TestResolveMessageSenderBotUsesCache(t *testing.T) {
+	client := &Client{cfg: config.Config{MirrorBotMessages: true}}
+	client.cacheSenderBot(100, true)
+	getter := &fakeTelegramUserGetter{}
+	meta := messageMeta{chatType: "group", userID: 100, text: "bot says hi"}
+
+	if err := client.resolveMessageSenderBot(context.Background(), getter, tg.Entities{}, &tg.Message{ID: 55}, &meta); err != nil {
+		t.Fatalf("expected cached sender lookup to succeed: %v", err)
+	}
+
+	if !meta.senderIsBot {
+		t.Fatalf("expected cached bot status")
+	}
+	if len(getter.ids) != 0 {
+		t.Fatalf("expected no telegram lookup when cache exists, got %d", len(getter.ids))
 	}
 }
 
