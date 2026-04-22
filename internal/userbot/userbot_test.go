@@ -209,6 +209,47 @@ func TestShouldMirrorBotMessage(t *testing.T) {
 	}
 }
 
+func TestIsHistoricalMessage(t *testing.T) {
+	processStart := time.Unix(1_700_000_000, 0)
+	client := &Client{processStart: processStart}
+
+	tests := []struct {
+		name string
+		msg  *tg.Message
+		want bool
+	}{
+		{
+			name: "old message ignored",
+			msg:  &tg.Message{Date: int(processStart.Add(-time.Minute).Unix())},
+			want: true,
+		},
+		{
+			name: "message inside startup grace allowed",
+			msg:  &tg.Message{Date: int(processStart.Add(-5 * time.Second).Unix())},
+		},
+		{
+			name: "new message allowed",
+			msg:  &tg.Message{Date: int(processStart.Add(time.Second).Unix())},
+		},
+		{
+			name: "missing telegram date allowed",
+			msg:  &tg.Message{},
+		},
+		{
+			name: "nil message allowed",
+			msg:  nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := client.isHistoricalMessage(tt.msg); got != tt.want {
+				t.Fatalf("expected %v, got %v", tt.want, got)
+			}
+		})
+	}
+}
+
 func TestExtractMessageMetaDetectsBotSender(t *testing.T) {
 	client := &Client{}
 	msg := &tg.Message{

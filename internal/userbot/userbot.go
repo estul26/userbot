@@ -27,6 +27,7 @@ const (
 	pingMongoTimeout    = 2 * time.Second
 	statusLookupTimeout = 2 * time.Second
 	statusCountTimeout  = 2 * time.Second
+	historyCutoffGrace  = 10 * time.Second
 )
 
 type UserRegistrar interface {
@@ -268,6 +269,9 @@ func (c *Client) handleMessage(ctx context.Context, api telegramAPI, entities tg
 	if !ok || msg == nil {
 		return nil
 	}
+	if c.isHistoricalMessage(msg) {
+		return nil
+	}
 
 	meta := c.extractMessageMeta(entities, msg)
 	if err := c.resolveMessageSenderBot(ctx, api, entities, msg, &meta); err != nil {
@@ -351,6 +355,15 @@ func (c *Client) handleMessage(ctx context.Context, api telegramAPI, entities tg
 	}).Info("sent userbot command response")
 
 	return nil
+}
+
+func (c *Client) isHistoricalMessage(msg *tg.Message) bool {
+	if msg == nil || msg.Date == 0 || c.processStart.IsZero() {
+		return false
+	}
+
+	messageTime := time.Unix(int64(msg.Date), 0)
+	return messageTime.Before(c.processStart.Add(-historyCutoffGrace))
 }
 
 func (c *Client) registerSeen(ctx context.Context, meta messageMeta) error {
