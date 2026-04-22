@@ -570,12 +570,43 @@ func forwardMessageToSamePeer(ctx context.Context, forwarder telegramMessageForw
 		RandomID: []int64{randomID},
 	}
 	request.SetDropAuthor(true)
+	if replyTo := inputReplyToFromMessage(msg); replyTo != nil {
+		request.SetReplyTo(replyTo)
+	}
 
 	if _, err := forwarder.MessagesForwardMessages(ctx, request); err != nil {
 		return fmt.Errorf("forward message: %w", err)
 	}
 
 	return nil
+}
+
+func inputReplyToFromMessage(msg tg.NotEmptyMessage) tg.InputReplyToClass {
+	if msg == nil {
+		return nil
+	}
+
+	replyHeaderClass, ok := msg.GetReplyTo()
+	if !ok {
+		return nil
+	}
+
+	replyHeader, ok := replyHeaderClass.(*tg.MessageReplyHeader)
+	if !ok {
+		return nil
+	}
+
+	replyToMsgID, ok := replyHeader.GetReplyToMsgID()
+	if !ok || replyToMsgID == 0 {
+		return nil
+	}
+
+	replyTo := &tg.InputReplyToMessage{ReplyToMsgID: replyToMsgID}
+	if topMsgID, ok := replyHeader.GetReplyToTopID(); ok && topMsgID != 0 {
+		replyTo.SetTopMsgID(topMsgID)
+	}
+
+	return replyTo
 }
 
 func hasMessageMedia(msg *tg.Message) bool {

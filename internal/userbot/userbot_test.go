@@ -387,6 +387,54 @@ func TestForwardMessageToSamePeerDropsAuthor(t *testing.T) {
 	}
 }
 
+func TestForwardMessageToSamePeerPreservesReply(t *testing.T) {
+	forwarder := &fakeTelegramMessageForwarder{}
+	replyHeader := &tg.MessageReplyHeader{}
+	replyHeader.SetReplyToMsgID(44)
+	msg := &tg.Message{
+		ID:     55,
+		PeerID: &tg.PeerChat{ChatID: 200},
+	}
+	msg.SetReplyTo(replyHeader)
+
+	if err := forwardMessageToSamePeer(context.Background(), forwarder, tg.Entities{}, msg); err != nil {
+		t.Fatalf("expected forward to succeed: %v", err)
+	}
+
+	request := forwarder.requests[0]
+	replyClass, ok := request.GetReplyTo()
+	if !ok {
+		t.Fatalf("expected forward request to include reply target")
+	}
+	replyTo, ok := replyClass.(*tg.InputReplyToMessage)
+	if !ok {
+		t.Fatalf("expected InputReplyToMessage, got %T", replyClass)
+	}
+	if replyTo.ReplyToMsgID != 44 {
+		t.Fatalf("expected reply target 44, got %d", replyTo.ReplyToMsgID)
+	}
+}
+
+func TestInputReplyToFromMessagePreservesTopic(t *testing.T) {
+	replyHeader := &tg.MessageReplyHeader{}
+	replyHeader.SetReplyToMsgID(44)
+	replyHeader.SetReplyToTopID(10)
+	msg := &tg.Message{}
+	msg.SetReplyTo(replyHeader)
+
+	replyClass := inputReplyToFromMessage(msg)
+	replyTo, ok := replyClass.(*tg.InputReplyToMessage)
+	if !ok {
+		t.Fatalf("expected InputReplyToMessage, got %T", replyClass)
+	}
+	if replyTo.ReplyToMsgID != 44 {
+		t.Fatalf("expected reply target 44, got %d", replyTo.ReplyToMsgID)
+	}
+	if topMsgID, ok := replyTo.GetTopMsgID(); !ok || topMsgID != 10 {
+		t.Fatalf("expected topic id 10, got %d, ok=%v", topMsgID, ok)
+	}
+}
+
 func TestInputPeerFromPeerAllowsBasicGroupWithoutEntity(t *testing.T) {
 	inputPeer, err := inputPeerFromPeer(tg.Entities{}, &tg.PeerChat{ChatID: 4750561458})
 	if err != nil {
