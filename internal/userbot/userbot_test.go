@@ -57,6 +57,22 @@ func (f *fakeTelegramMessageForwarder) MessagesForwardMessages(_ context.Context
 	return &tg.Updates{}, f.err
 }
 
+type fakeTelegramMessageSender struct {
+	requests []*tg.MessagesSendMessageRequest
+	err      error
+}
+
+func (f *fakeTelegramMessageSender) MessagesSendMessage(_ context.Context, request *tg.MessagesSendMessageRequest) (tg.UpdatesClass, error) {
+	f.requests = append(f.requests, request)
+	return &tg.Updates{}, f.err
+}
+
+type fakeTelegramAPI struct {
+	fakeTelegramUserGetter
+	fakeTelegramMessageForwarder
+	fakeTelegramMessageSender
+}
+
 func TestOwnerCommandRecognition(t *testing.T) {
 	tests := []struct {
 		name string
@@ -290,6 +306,28 @@ func TestExtractMessageMetaDetectsMedia(t *testing.T) {
 	}
 }
 
+func TestExtractMessageMetaDetectsReplyTarget(t *testing.T) {
+	client := &Client{}
+	replyHeader := &tg.MessageReplyHeader{}
+	replyHeader.SetReplyToMsgID(44)
+	replyHeader.SetReplyToTopID(10)
+	msg := &tg.Message{
+		PeerID:  &tg.PeerChat{ChatID: 200},
+		Message: "bot says hi",
+	}
+	msg.SetFromID(&tg.PeerUser{UserID: 100})
+	msg.SetReplyTo(replyHeader)
+
+	meta := client.extractMessageMeta(tg.Entities{}, msg)
+
+	if meta.replyToMsgID != 44 {
+		t.Fatalf("expected reply target 44, got %d", meta.replyToMsgID)
+	}
+	if meta.replyToTopID != 10 {
+		t.Fatalf("expected reply top id 10, got %d", meta.replyToTopID)
+	}
+}
+
 func TestResolveMessageSenderBotUsesInputUserFromMessage(t *testing.T) {
 	client := &Client{cfg: config.Config{MirrorBotMessages: true}}
 	getter := &fakeTelegramUserGetter{
@@ -344,6 +382,63 @@ func TestResolveMessageSenderBotUsesCache(t *testing.T) {
 	}
 	if len(getter.ids) != 0 {
 		t.Fatalf("expected no telegram lookup when cache exists, got %d", len(getter.ids))
+	}
+}
+
+func TestMirrorMessageToSamePeerSendsTextReply(t *testing.T) {
+	api := &fakeTelegramAPI{}
+	replyHeader := &tg.MessageReplyHeader{}
+	replyHeader.SetReplyToMsgID(44)
+	msg := &tg.Message{
+		ID:      55,
+		PeerID:  &tg.PeerChat{ChatID: 200},
+		Message: "bot says hi",
+	}
+	msg.SetReplyTo(replyHeader)
+
+	if err := mirrorMessageToSamePeer(context.Background(), api, tg.Entities{}, msg); err != nil {
+		t.Fatalf("expected mirror to succeed: %v", err)
+	}
+	if len(api.fakeTelegramMessageSender.requests) != 1 {
+		t.Fatalf("expected one send request, got %d", len(api.fakeTelegramMessageSender.requests))
+	}
+	if len(api.fakeTelegramMessageForwarder.requests) != 0 {
+		t.Fatalf("expected no forward request, got %d", len(api.fakeTelegramMessageForwarder.requests))
+	}
+
+	request := api.fakeTelegramMessageSender.requests[0]
+	if request.Message != "bot says hi" {
+		t.Fatalf("expected mirrored text, got %q", request.Message)
+	}
+	replyClass, ok := request.GetReplyTo()
+	if !ok {
+		t.Fatalf("expected send request to include reply target")
+	}
+	replyTo, ok := replyClass.(*tg.InputReplyToMessage)
+	if !ok {
+		t.Fatalf("expected InputReplyToMessage, got %T", replyClass)
+	}
+	if replyTo.ReplyToMsgID != 44 {
+		t.Fatalf("expected reply target 44, got %d", replyTo.ReplyToMsgID)
+	}
+}
+
+func TestMirrorMessageToSamePeerForwardsMedia(t *testing.T) {
+	api := &fakeTelegramAPI{}
+	msg := &tg.Message{
+		ID:     55,
+		PeerID: &tg.PeerChat{ChatID: 200},
+		Media:  &tg.MessageMediaPhoto{},
+	}
+
+	if err := mirrorMessageToSamePeer(context.Background(), api, tg.Entities{}, msg); err != nil {
+		t.Fatalf("expected mirror to succeed: %v", err)
+	}
+	if len(api.fakeTelegramMessageForwarder.requests) != 1 {
+		t.Fatalf("expected one forward request, got %d", len(api.fakeTelegramMessageForwarder.requests))
+	}
+	if len(api.fakeTelegramMessageSender.requests) != 0 {
+		t.Fatalf("expected no send request, got %d", len(api.fakeTelegramMessageSender.requests))
 	}
 }
 

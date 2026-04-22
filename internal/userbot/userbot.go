@@ -55,9 +55,14 @@ type telegramMessageForwarder interface {
 	MessagesForwardMessages(ctx context.Context, request *tg.MessagesForwardMessagesRequest) (tg.UpdatesClass, error)
 }
 
+type telegramMessageSender interface {
+	MessagesSendMessage(ctx context.Context, request *tg.MessagesSendMessageRequest) (tg.UpdatesClass, error)
+}
+
 type telegramAPI interface {
 	telegramUserGetter
 	telegramMessageForwarder
+	telegramMessageSender
 }
 
 type ClientOption func(*clientOptions)
@@ -86,14 +91,16 @@ type Client struct {
 }
 
 type messageMeta struct {
-	userID      int64
-	chatID      int64
-	chatType    string
-	chatTitle   string
-	text        string
-	out         bool
-	senderIsBot bool
-	hasMedia    bool
+	userID       int64
+	chatID       int64
+	chatType     string
+	chatTitle    string
+	text         string
+	out          bool
+	senderIsBot  bool
+	hasMedia     bool
+	replyToMsgID int
+	replyToTopID int
 }
 
 func WithUserRegistrar(registrar UserRegistrar) ClientOption {
@@ -302,25 +309,33 @@ func (c *Client) handleMessage(ctx context.Context, api telegramAPI, entities tg
 	if meta.chatID != 0 {
 		fields["chat_id"] = meta.chatID
 	}
+	if meta.replyToMsgID != 0 {
+		fields["reply_to_msg_id"] = meta.replyToMsgID
+	}
+	if meta.replyToTopID != 0 {
+		fields["reply_to_top_id"] = meta.replyToTopID
+	}
 	if meta.text != "" {
 		fields["text"] = meta.text
 	}
 	c.logger.WithFields(fields).Info("telegram update received")
 
 	if c.shouldMirrorBotMessage(meta) {
-		if err := forwardMessageToSamePeer(ctx, api, entities, messageClass); err != nil {
+		if err := mirrorMessageToSamePeer(ctx, api, entities, msg); err != nil {
 			c.logger.WithError(err).WithFields(logging.Fields{
-				"event":   "bot_message_mirror_failed",
-				"chat_id": meta.chatID,
-				"user_id": meta.userID,
+				"event":           "bot_message_mirror_failed",
+				"chat_id":         meta.chatID,
+				"reply_to_msg_id": meta.replyToMsgID,
+				"user_id":         meta.userID,
 			}).Error("failed to mirror bot message")
 			return err
 		}
 
 		c.logger.WithFields(logging.Fields{
-			"event":   "bot_message_mirrored",
-			"chat_id": meta.chatID,
-			"user_id": meta.userID,
+			"event":           "bot_message_mirrored",
+			"chat_id":         meta.chatID,
+			"reply_to_msg_id": meta.replyToMsgID,
+			"user_id":         meta.userID,
 		}).Info("mirrored bot message")
 		return nil
 	}
@@ -396,6 +411,7 @@ func (c *Client) extractMessageMeta(entities tg.Entities, msg *tg.Message) messa
 	if user := entities.Users[meta.userID]; user != nil {
 		meta.senderIsBot = user.Bot
 	}
+	meta.replyToMsgID, meta.replyToTopID = replyTargetFromMessage(msg)
 
 	switch peer := msg.PeerID.(type) {
 	case *tg.PeerUser:
@@ -543,6 +559,49 @@ func sendTextToMessagePeer(ctx context.Context, raw *tg.Client, entities tg.Enti
 	return nil
 }
 
+func mirrorMessageToSamePeer(ctx context.Context, api telegramAPI, entities tg.Entities, msg *tg.Message) error {
+	if msg == nil {
+		return errors.New("telegram message is nil")
+	}
+
+	if !hasMessageMedia(msg) && strings.TrimSpace(msg.Message) != "" {
+		return sendTextToSamePeerWithReply(ctx, api, entities, msg, strings.TrimSpace(msg.Message))
+	}
+
+	return forwardMessageToSamePeer(ctx, api, entities, msg)
+}
+
+func sendTextToSamePeerWithReply(ctx context.Context, sender telegramMessageSender, entities tg.Entities, msg tg.NotEmptyMessage, text string) error {
+	if sender == nil {
+		return errors.New("telegram message sender is nil")
+	}
+
+	inputPeer, err := inputPeerFromPeer(entities, msg.GetPeerID())
+	if err != nil {
+		return err
+	}
+
+	randomID, err := tdcrypto.RandInt64(rand.Reader)
+	if err != nil {
+		return fmt.Errorf("generate message random id: %w", err)
+	}
+
+	request := &tg.MessagesSendMessageRequest{
+		Peer:     inputPeer,
+		Message:  text,
+		RandomID: randomID,
+	}
+	if replyTo := inputReplyToFromMessage(msg); replyTo != nil {
+		request.SetReplyTo(replyTo)
+	}
+
+	if _, err := sender.MessagesSendMessage(ctx, request); err != nil {
+		return fmt.Errorf("send text: %w", err)
+	}
+
+	return nil
+}
+
 func forwardMessageToSamePeer(ctx context.Context, forwarder telegramMessageForwarder, entities tg.Entities, messageClass tg.MessageClass) error {
 	if forwarder == nil {
 		return errors.New("telegram message forwarder is nil")
@@ -579,6 +638,21 @@ func forwardMessageToSamePeer(ctx context.Context, forwarder telegramMessageForw
 	}
 
 	return nil
+}
+
+func replyTargetFromMessage(msg tg.NotEmptyMessage) (int, int) {
+	replyTo := inputReplyToFromMessage(msg)
+	if replyTo == nil {
+		return 0, 0
+	}
+
+	replyToMessage, ok := replyTo.(*tg.InputReplyToMessage)
+	if !ok {
+		return 0, 0
+	}
+
+	topMsgID, _ := replyToMessage.GetTopMsgID()
+	return replyToMessage.ReplyToMsgID, topMsgID
 }
 
 func inputReplyToFromMessage(msg tg.NotEmptyMessage) tg.InputReplyToClass {
