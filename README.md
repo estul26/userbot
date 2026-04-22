@@ -44,6 +44,8 @@ sudo chown "$(id -u):$(id -g)" /var/lib/YOUR_REPO
 chmod 700 /var/lib/YOUR_REPO
 ```
 
+Run those commands manually on the VPS. The GitHub deploy workflow does not run `sudo` because SSH deploys are non-interactive and cannot answer a sudo password prompt.
+
 The deploy workflow expects this file to exist after login:
 
 ```sh

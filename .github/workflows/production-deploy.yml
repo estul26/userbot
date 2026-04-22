@@ -60,13 +60,19 @@ jobs:
             echo "${GITHUB_TOKEN}" | docker login ghcr.io -u "${GITHUB_ACTOR}" --password-stdin
             docker pull "${IMAGE_TAG}"
 
-            APP_UID="$(id -u)"
-            APP_GID="$(id -g)"
             if [ ! -d "${USERBOT_SESSION_DIR}" ]; then
-              sudo install -d -m 700 -o "${APP_UID}" -g "${APP_GID}" "${USERBOT_SESSION_DIR}"
+              echo "Missing session directory: ${USERBOT_SESSION_DIR}"
+              echo "Run these commands once on the VPS before deploying:"
+              echo "  sudo mkdir -p ${USERBOT_SESSION_DIR}"
+              echo "  sudo chown \"\$(id -u):\$(id -g)\" ${USERBOT_SESSION_DIR}"
+              echo "  chmod 700 ${USERBOT_SESSION_DIR}"
+              exit 1
             fi
             if [ ! -w "${USERBOT_SESSION_DIR}" ]; then
-              sudo chown "${APP_UID}:${APP_GID}" "${USERBOT_SESSION_DIR}"
+              echo "Session directory is not writable by the SSH deploy user: ${USERBOT_SESSION_DIR}"
+              echo "Run this command once on the VPS:"
+              echo "  sudo chown \"\$(id -u):\$(id -g)\" ${USERBOT_SESSION_DIR}"
+              exit 1
             fi
             chmod 700 "${USERBOT_SESSION_DIR}"
 
