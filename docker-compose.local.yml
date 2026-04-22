@@ -39,6 +39,7 @@ services:
       MONGO_URI: mongodb://mongo:27017
       MONGO_DB: tg_bot_dev
       MIRROR_BOT_MESSAGES: ${MIRROR_BOT_MESSAGES:-false}
+      MIRROR_ORDER_PATTERN: ${MIRROR_ORDER_PATTERN:-}
     volumes:
       - ./data:/data
 

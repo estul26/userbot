@@ -14,6 +14,7 @@ env:
   USERBOT_SESSION_DIR: ${{ vars.USERBOT_SESSION_DIR || format('/var/lib/{0}', github.event.repository.name) }}
   USERBOT_SESSION_FILE: ${{ vars.USERBOT_SESSION_FILE || format('{0}.session.enc', github.event.repository.name) }}
   MIRROR_BOT_MESSAGES: ${{ vars.MIRROR_BOT_MESSAGES || 'false' }}
+  MIRROR_ORDER_PATTERN: ${{ vars.MIRROR_ORDER_PATTERN || '' }}
   APP_ENV: production
 
 concurrency:
@@ -46,6 +47,7 @@ jobs:
           MONGO_DB: ${{ env.MONGO_DB }}
           LOG_LEVEL: ${{ env.LOG_LEVEL }}
           MIRROR_BOT_MESSAGES: ${{ env.MIRROR_BOT_MESSAGES }}
+          MIRROR_ORDER_PATTERN: ${{ env.MIRROR_ORDER_PATTERN }}
           USERBOT_SESSION_DIR: ${{ env.USERBOT_SESSION_DIR }}
           USERBOT_SESSION_FILE: ${{ env.USERBOT_SESSION_FILE }}
           GITHUB_ACTOR: ${{ github.actor }}
@@ -55,7 +57,7 @@ jobs:
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.SSH_KEY }}
           port: ${{ secrets.VPS_PORT }}
-          envs: IMAGE_TAG,CONTAINER_NAME,APP_ENV,TELEGRAM_API_ID,TELEGRAM_API_HASH,TELEGRAM_PHONE,TELEGRAM_SESSION_PATH,TELEGRAM_SESSION_PASSPHRASE,USERBOT_OWNER_ID,MONGO_URI,MONGO_DB,LOG_LEVEL,MIRROR_BOT_MESSAGES,USERBOT_SESSION_DIR,USERBOT_SESSION_FILE,GITHUB_ACTOR,GITHUB_TOKEN
+          envs: IMAGE_TAG,CONTAINER_NAME,APP_ENV,TELEGRAM_API_ID,TELEGRAM_API_HASH,TELEGRAM_PHONE,TELEGRAM_SESSION_PATH,TELEGRAM_SESSION_PASSPHRASE,USERBOT_OWNER_ID,MONGO_URI,MONGO_DB,LOG_LEVEL,MIRROR_BOT_MESSAGES,MIRROR_ORDER_PATTERN,USERBOT_SESSION_DIR,USERBOT_SESSION_FILE,GITHUB_ACTOR,GITHUB_TOKEN
           script: |
             set -eo pipefail
 
@@ -113,6 +115,7 @@ jobs:
               -e MONGO_URI="${MONGO_URI}" \
               -e MONGO_DB="${MONGO_DB}" \
               -e MIRROR_BOT_MESSAGES="${MIRROR_BOT_MESSAGES}" \
+              -e MIRROR_ORDER_PATTERN="${MIRROR_ORDER_PATTERN}" \
               ${LOG_OPT} \
               --log-driver json-file \
               --log-opt max-size=10m \

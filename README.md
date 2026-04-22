@@ -19,7 +19,7 @@ Required env vars:
 - `USERBOT_OWNER_ID`: Telegram user ID that must match the authenticated account.
 - `MONGO_URI`, `MONGO_DB`.
 
-Optional env vars: `APP_ENV` (`production` default, `development` enables `.env`), `LOG_LEVEL`, and `MIRROR_BOT_MESSAGES`.
+Optional env vars: `APP_ENV` (`production` default, `development` enables `.env`), `LOG_LEVEL`, `MIRROR_BOT_MESSAGES`, and `MIRROR_ORDER_PATTERN`.
 
 ## Local development
 - Start MongoDB: `docker compose -f docker-compose.local.yml up -d mongo`.
@@ -33,18 +33,27 @@ Owner commands are sent from your own Telegram account in any chat:
 - `.status`
 
 ## Bot message mirroring
-Set `MIRROR_BOT_MESSAGES=true` to repost incoming bot-authored text messages in group/supergroup chats.
+Set `MIRROR_BOT_MESSAGES=true` to repost incoming bot-authored messages in group/supergroup chats when the message text/caption contains an order number.
 
 Behavior:
 - Only mirrors messages where the sender is a Telegram bot.
 - Only mirrors group/supergroup messages.
 - Ignores your own outgoing messages, so the userbot does not mirror itself.
-- Mirrors text only; media/captions are not copied in this version.
+- Ignores old Telegram history from before the current process start.
+- Mirrors text replies as replies to the same original message.
+- Mirrors media messages by forwarding/copying them back into the group.
+- Requires an order-number candidate in the text/caption. The default candidate pattern is `\b[A-Za-z0-9][A-Za-z0-9_-]{5,}\b`, and the matched candidate must contain at least one digit.
 
 For production, add a GitHub repository variable:
 
 ```text
 MIRROR_BOT_MESSAGES=true
+```
+
+Optional custom order pattern:
+
+```text
+MIRROR_ORDER_PATTERN=\b[A-Za-z0-9][A-Za-z0-9_-]{5,}\b
 ```
 
 ## Production one-time login
@@ -116,6 +125,7 @@ Optional repository variables:
 - `MONGO_DB`, default is the repository name.
 - `LOG_LEVEL`, default is `info`.
 - `MIRROR_BOT_MESSAGES`, default is `false`.
+- `MIRROR_ORDER_PATTERN`, default is `\b[A-Za-z0-9][A-Za-z0-9_-]{5,}\b`.
 - `USERBOT_SESSION_DIR`, default is `/var/lib/<repository-name>`.
 - `USERBOT_SESSION_FILE`, default is `<repository-name>.session.enc`.
 

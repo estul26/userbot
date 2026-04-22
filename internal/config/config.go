@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -25,15 +26,17 @@ const (
 	KeyAppEnv                    = "APP_ENV"
 	KeyLogLevel                  = "LOG_LEVEL"
 	KeyMirrorBotMessages         = "MIRROR_BOT_MESSAGES"
+	KeyMirrorOrderPattern        = "MIRROR_ORDER_PATTERN"
 
 	// Allowed environment values.
 	EnvDevelopment = "development"
 	EnvProduction  = "production"
 
 	// Defaults for optional settings.
-	DefaultAppEnv            = EnvProduction
-	DefaultLogLevel          = "info"
-	DefaultMirrorBotMessages = false
+	DefaultAppEnv             = EnvProduction
+	DefaultLogLevel           = "info"
+	DefaultMirrorBotMessages  = false
+	DefaultMirrorOrderPattern = `\b[A-Za-z0-9][A-Za-z0-9_-]{5,}\b`
 
 	// Recommended database names by environment.
 	DefaultMongoDBProd = "tg_bot"
@@ -120,7 +123,13 @@ var Contract = []VarSpec{
 		Key:         KeyMirrorBotMessages,
 		Example:     "true / false",
 		Default:     "false",
-		Description: "When true, repost incoming bot-authored text messages seen in groups.",
+		Description: "When true, repost incoming bot-authored messages seen in groups when an order number is present.",
+	},
+	{
+		Key:         KeyMirrorOrderPattern,
+		Example:     DefaultMirrorOrderPattern,
+		Default:     DefaultMirrorOrderPattern,
+		Description: "Regular expression for candidate order numbers in mirrored bot text/captions; candidates must also contain at least one digit.",
 	},
 }
 
@@ -137,6 +146,7 @@ type Config struct {
 	AppEnv                    string
 	LogLevel                  string
 	MirrorBotMessages         bool
+	MirrorOrderPattern        string
 }
 
 // Load resolves configuration from the environment (with optional dotenv in development).
@@ -160,6 +170,7 @@ func Load() (Config, error) {
 		MongoDB:                   strings.TrimSpace(os.Getenv(KeyMongoDB)),
 		LogLevel:                  firstNonEmpty(strings.TrimSpace(os.Getenv(KeyLogLevel)), DefaultLogLevel),
 		MirrorBotMessages:         DefaultMirrorBotMessages,
+		MirrorOrderPattern:        firstNonEmpty(strings.TrimSpace(os.Getenv(KeyMirrorOrderPattern)), DefaultMirrorOrderPattern),
 	}
 
 	if err := validateAppEnv(cfg.AppEnv); err != nil {
@@ -171,6 +182,9 @@ func Load() (Config, error) {
 			return Config{}, fmt.Errorf("invalid %s: %w", KeyMirrorBotMessages, parseErr)
 		}
 		cfg.MirrorBotMessages = mirror
+	}
+	if _, compileErr := regexp.Compile(cfg.MirrorOrderPattern); compileErr != nil {
+		return Config{}, fmt.Errorf("invalid %s: %w", KeyMirrorOrderPattern, compileErr)
 	}
 
 	missing := make([]string, 0)
@@ -254,6 +268,7 @@ func FormatRedacted(cfg Config) string {
 		"mongo_db: " + cfg.MongoDB,
 		"log_level: " + cfg.LogLevel,
 		fmt.Sprintf("mirror_bot_messages: %t", cfg.MirrorBotMessages),
+		"mirror_order_pattern: " + cfg.MirrorOrderPattern,
 	}
 
 	return strings.Join(lines, "\n")

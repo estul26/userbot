@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -28,6 +29,12 @@ const (
 	statusLookupTimeout = 2 * time.Second
 	statusCountTimeout  = 2 * time.Second
 	historyCutoffGrace  = 10 * time.Second
+)
+
+var (
+	defaultMirrorOrderPattern = regexp.MustCompile(config.DefaultMirrorOrderPattern)
+	dashDatePattern           = regexp.MustCompile(`^\d{4}-\d{1,2}-\d{1,2}$`)
+	compactDatePattern        = regexp.MustCompile(`^(19|20)\d{6}$`)
 )
 
 type UserRegistrar interface {
@@ -88,19 +95,21 @@ type Client struct {
 	sessionStorage *EncryptedFileSessionStorage
 	senderBotMu    sync.RWMutex
 	senderBotCache map[int64]bool
+	orderPattern   *regexp.Regexp
 }
 
 type messageMeta struct {
-	userID       int64
-	chatID       int64
-	chatType     string
-	chatTitle    string
-	text         string
-	out          bool
-	senderIsBot  bool
-	hasMedia     bool
-	replyToMsgID int
-	replyToTopID int
+	userID         int64
+	chatID         int64
+	chatType       string
+	chatTitle      string
+	text           string
+	out            bool
+	senderIsBot    bool
+	hasMedia       bool
+	hasOrderNumber bool
+	replyToMsgID   int
+	replyToTopID   int
 }
 
 func WithUserRegistrar(registrar UserRegistrar) ClientOption {
@@ -158,6 +167,10 @@ func NewClient(cfg config.Config, logger *logrus.Entry, opts ...ClientOption) (*
 	if err != nil {
 		return nil, err
 	}
+	orderPattern, err := compileMirrorOrderPattern(cfg.MirrorOrderPattern)
+	if err != nil {
+		return nil, err
+	}
 
 	return &Client{
 		cfg:            cfg,
@@ -170,6 +183,7 @@ func NewClient(cfg config.Config, logger *logrus.Entry, opts ...ClientOption) (*
 		loginMode:      clientOpts.loginMode,
 		sessionStorage: storage,
 		senderBotCache: make(map[int64]bool),
+		orderPattern:   orderPattern,
 	}, nil
 }
 
@@ -297,11 +311,12 @@ func (c *Client) handleMessage(ctx context.Context, api telegramAPI, entities tg
 	}
 
 	fields := logging.Fields{
-		"event":         "userbot_update",
-		"update_type":   updateType,
-		"chat_type":     meta.chatType,
-		"out":           meta.out,
-		"sender_is_bot": meta.senderIsBot,
+		"event":            "userbot_update",
+		"update_type":      updateType,
+		"chat_type":        meta.chatType,
+		"has_order_number": meta.hasOrderNumber,
+		"out":              meta.out,
+		"sender_is_bot":    meta.senderIsBot,
 	}
 	if meta.userID != 0 {
 		fields["user_id"] = meta.userID
@@ -401,6 +416,7 @@ func (c *Client) extractMessageMeta(entities tg.Entities, msg *tg.Message) messa
 		out:      msg.Out,
 		hasMedia: hasMessageMedia(msg),
 	}
+	meta.hasOrderNumber = c.hasOrderNumber(meta.text)
 
 	if from, ok := msg.GetFromID(); ok {
 		meta.userID = peerUserID(from)
@@ -443,6 +459,7 @@ func (c *Client) shouldMirrorBotMessage(meta messageMeta) bool {
 	return c.cfg.MirrorBotMessages &&
 		meta.chatType == "group" &&
 		meta.senderIsBot &&
+		meta.hasOrderNumber &&
 		!meta.out &&
 		meta.hasMirrorableContent()
 }
@@ -450,6 +467,7 @@ func (c *Client) shouldMirrorBotMessage(meta messageMeta) bool {
 func (c *Client) shouldLookupMessageSenderBot(meta messageMeta) bool {
 	return c.cfg.MirrorBotMessages &&
 		meta.chatType == "group" &&
+		meta.hasOrderNumber &&
 		!meta.senderIsBot &&
 		!meta.out &&
 		meta.hasMirrorableContent() &&
@@ -458,6 +476,52 @@ func (c *Client) shouldLookupMessageSenderBot(meta messageMeta) bool {
 
 func (m messageMeta) hasMirrorableContent() bool {
 	return m.text != "" || m.hasMedia
+}
+
+func compileMirrorOrderPattern(pattern string) (*regexp.Regexp, error) {
+	pattern = strings.TrimSpace(pattern)
+	if pattern == "" {
+		pattern = config.DefaultMirrorOrderPattern
+	}
+
+	compiled, err := regexp.Compile(pattern)
+	if err != nil {
+		return nil, fmt.Errorf("compile mirror order pattern: %w", err)
+	}
+	return compiled, nil
+}
+
+func (c *Client) hasOrderNumber(text string) bool {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return false
+	}
+
+	pattern := c.orderPattern
+	if pattern == nil {
+		pattern = defaultMirrorOrderPattern
+	}
+
+	for _, candidate := range pattern.FindAllString(text, -1) {
+		if containsASCIIDigit(candidate) && !isLikelyDateToken(candidate) {
+			return true
+		}
+	}
+
+	return false
+}
+
+func isLikelyDateToken(value string) bool {
+	return dashDatePattern.MatchString(value) || compactDatePattern.MatchString(value)
+}
+
+func containsASCIIDigit(value string) bool {
+	for _, r := range value {
+		if r >= '0' && r <= '9' {
+			return true
+		}
+	}
+	return false
 }
 
 func (c *Client) resolveMessageSenderBot(ctx context.Context, userGetter telegramUserGetter, entities tg.Entities, msg *tg.Message, meta *messageMeta) error {

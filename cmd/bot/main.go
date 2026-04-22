@@ -57,11 +57,12 @@ func main() {
 	}
 
 	logger.WithFields(logging.Fields{
-		"event":               "startup",
-		"mongo_db":            cfg.MongoDB,
-		"login_mode":          *loginMode,
-		"mirror_bot_messages": cfg.MirrorBotMessages,
-		"session_path":        cfg.TelegramSessionPath,
+		"event":                "startup",
+		"mongo_db":             cfg.MongoDB,
+		"login_mode":           *loginMode,
+		"mirror_bot_messages":  cfg.MirrorBotMessages,
+		"mirror_order_pattern": cfg.MirrorOrderPattern,
+		"session_path":         cfg.TelegramSessionPath,
 	}).Info("configuration loaded")
 
 	connectCtx, cancel := context.WithTimeout(context.Background(), mongoConnectTimeout)

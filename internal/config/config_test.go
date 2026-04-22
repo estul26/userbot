@@ -11,6 +11,7 @@ func TestLoadDefaultsAndRequired(t *testing.T) {
 	unsetEnv(t, KeyAppEnv)
 	unsetEnv(t, KeyLogLevel)
 	unsetEnv(t, KeyMirrorBotMessages)
+	unsetEnv(t, KeyMirrorOrderPattern)
 
 	t.Setenv(KeyTelegramAPIID, "123456")
 	t.Setenv(KeyTelegramAPIHash, "hash")
@@ -44,6 +45,9 @@ func TestLoadDefaultsAndRequired(t *testing.T) {
 
 	if cfg.MirrorBotMessages != DefaultMirrorBotMessages {
 		t.Fatalf("expected mirror bot messages default %v, got %v", DefaultMirrorBotMessages, cfg.MirrorBotMessages)
+	}
+	if cfg.MirrorOrderPattern != DefaultMirrorOrderPattern {
+		t.Fatalf("expected mirror order pattern default %q, got %q", DefaultMirrorOrderPattern, cfg.MirrorOrderPattern)
 	}
 }
 
@@ -105,6 +109,7 @@ MONGO_URI=mongodb://from-dotenv
 MONGO_DB=tg_bot_dev
 LOG_LEVEL=debug
 MIRROR_BOT_MESSAGES=true
+MIRROR_ORDER_PATTERN=\b[A-Z0-9]{6,}\b
 `)
 
 	if err := os.WriteFile(filepath.Join(tmpDir, ".env"), dotenvContent, 0o644); err != nil {
@@ -135,6 +140,7 @@ MIRROR_BOT_MESSAGES=true
 	unsetEnv(t, KeyMongoDB)
 	unsetEnv(t, KeyLogLevel)
 	unsetEnv(t, KeyMirrorBotMessages)
+	unsetEnv(t, KeyMirrorOrderPattern)
 
 	cfg, err := Load()
 	if err != nil {
@@ -180,6 +186,9 @@ MIRROR_BOT_MESSAGES=true
 	if !cfg.MirrorBotMessages {
 		t.Fatalf("expected mirror bot messages from dotenv")
 	}
+	if cfg.MirrorOrderPattern != `\b[A-Z0-9]{6,}\b` {
+		t.Fatalf("expected mirror order pattern from dotenv, got %q", cfg.MirrorOrderPattern)
+	}
 }
 
 func TestLoadValidatesMirrorBotMessages(t *testing.T) {
@@ -202,6 +211,29 @@ func TestLoadValidatesMirrorBotMessages(t *testing.T) {
 
 	if !strings.Contains(err.Error(), KeyMirrorBotMessages) {
 		t.Fatalf("expected error to mention %s, got %v", KeyMirrorBotMessages, err)
+	}
+}
+
+func TestLoadValidatesMirrorOrderPattern(t *testing.T) {
+	unsetEnv(t, KeyAppEnv)
+
+	t.Setenv(KeyTelegramAPIID, "123456")
+	t.Setenv(KeyTelegramAPIHash, "hash")
+	t.Setenv(KeyTelegramPhone, "+15551234567")
+	t.Setenv(KeyTelegramSessionPath, "./data/session.enc")
+	t.Setenv(KeyTelegramSessionPassphrase, "passphrase")
+	t.Setenv(KeyUserbotOwner, "123")
+	t.Setenv(KeyMongoURI, "mongodb://localhost:27017")
+	t.Setenv(KeyMongoDB, "tg_bot")
+	t.Setenv(KeyMirrorOrderPattern, "[")
+
+	_, err := Load()
+	if err == nil {
+		t.Fatalf("expected invalid %s to error", KeyMirrorOrderPattern)
+	}
+
+	if !strings.Contains(err.Error(), KeyMirrorOrderPattern) {
+		t.Fatalf("expected error to mention %s, got %v", KeyMirrorOrderPattern, err)
 	}
 }
 
@@ -240,6 +272,7 @@ func TestFormatRedactedMasksSecrets(t *testing.T) {
 		AppEnv:                    EnvDevelopment,
 		LogLevel:                  "debug",
 		MirrorBotMessages:         true,
+		MirrorOrderPattern:        DefaultMirrorOrderPattern,
 	}
 
 	summary := FormatRedacted(cfg)
@@ -270,6 +303,9 @@ func TestFormatRedactedMasksSecrets(t *testing.T) {
 
 	if !strings.Contains(summary, "mirror_bot_messages: true") {
 		t.Fatalf("expected mirror setting in summary, got %s", summary)
+	}
+	if !strings.Contains(summary, "mirror_order_pattern: "+DefaultMirrorOrderPattern) {
+		t.Fatalf("expected mirror order pattern in summary, got %s", summary)
 	}
 }
 
