@@ -66,10 +66,16 @@ type telegramMessageSender interface {
 	MessagesSendMessage(ctx context.Context, request *tg.MessagesSendMessageRequest) (tg.UpdatesClass, error)
 }
 
+type telegramMessageGetter interface {
+	MessagesGetMessages(ctx context.Context, id []tg.InputMessageClass) (tg.MessagesMessagesClass, error)
+	ChannelsGetMessages(ctx context.Context, request *tg.ChannelsGetMessagesRequest) (tg.MessagesMessagesClass, error)
+}
+
 type telegramAPI interface {
 	telegramUserGetter
 	telegramMessageForwarder
 	telegramMessageSender
+	telegramMessageGetter
 }
 
 type ClientOption func(*clientOptions)
@@ -110,6 +116,7 @@ type messageMeta struct {
 	hasOrderNumber bool
 	replyToMsgID   int
 	replyToTopID   int
+	replyToUserbot bool
 }
 
 func WithUserRegistrar(registrar UserRegistrar) ClientOption {
@@ -302,6 +309,14 @@ func (c *Client) handleMessage(ctx context.Context, api telegramAPI, entities tg
 			"user_id": meta.userID,
 		}).Warn("failed to resolve message sender bot status")
 	}
+	if err := c.resolveReplyToUserbot(ctx, api, entities, msg, &meta); err != nil {
+		c.logger.WithError(err).WithFields(logging.Fields{
+			"event":           "reply_target_lookup_failed",
+			"chat_id":         meta.chatID,
+			"reply_to_msg_id": meta.replyToMsgID,
+			"user_id":         meta.userID,
+		}).Warn("failed to resolve reply target author")
+	}
 	if err := c.registerSeen(ctx, meta); err != nil {
 		c.logger.WithError(err).WithFields(logging.Fields{
 			"event":   "userbot_registration_failed",
@@ -316,6 +331,7 @@ func (c *Client) handleMessage(ctx context.Context, api telegramAPI, entities tg
 		"chat_type":        meta.chatType,
 		"has_order_number": meta.hasOrderNumber,
 		"out":              meta.out,
+		"reply_to_userbot": meta.replyToUserbot,
 		"sender_is_bot":    meta.senderIsBot,
 	}
 	if meta.userID != 0 {
@@ -461,7 +477,19 @@ func (c *Client) shouldMirrorBotMessage(meta messageMeta) bool {
 		meta.senderIsBot &&
 		meta.hasOrderNumber &&
 		!meta.out &&
+		!meta.replyToUserbot &&
 		meta.hasMirrorableContent()
+}
+
+func (c *Client) shouldLookupReplyToUserbot(meta messageMeta) bool {
+	return c.cfg.MirrorBotMessages &&
+		meta.chatType == "group" &&
+		meta.senderIsBot &&
+		meta.hasOrderNumber &&
+		!meta.out &&
+		meta.hasMirrorableContent() &&
+		meta.replyToMsgID != 0 &&
+		c.cfg.UserbotOwnerID != 0
 }
 
 func (c *Client) shouldLookupMessageSenderBot(meta messageMeta) bool {
@@ -570,6 +598,75 @@ func (c *Client) resolveMessageSenderBot(ctx context.Context, userGetter telegra
 	return nil
 }
 
+func (c *Client) resolveReplyToUserbot(ctx context.Context, messageGetter telegramMessageGetter, entities tg.Entities, msg *tg.Message, meta *messageMeta) error {
+	if meta == nil || !c.shouldLookupReplyToUserbot(*meta) || messageGetter == nil || msg == nil {
+		return nil
+	}
+
+	replyMsg, err := getMessageByID(ctx, messageGetter, entities, msg.PeerID, meta.replyToMsgID)
+	if err != nil {
+		return fmt.Errorf("get reply target message: %w", err)
+	}
+	if replyMsg == nil {
+		return nil
+	}
+
+	meta.replyToUserbot = messageAuthorUserID(replyMsg, c.cfg.UserbotOwnerID) == c.cfg.UserbotOwnerID
+	return nil
+}
+
+func getMessageByID(ctx context.Context, messageGetter telegramMessageGetter, entities tg.Entities, peerID tg.PeerClass, msgID int) (*tg.Message, error) {
+	if msgID == 0 {
+		return nil, nil
+	}
+
+	inputMessage := &tg.InputMessageID{ID: msgID}
+	var messages tg.MessagesMessagesClass
+	var err error
+
+	if _, ok := peerID.(*tg.PeerChannel); ok {
+		inputPeer, err := inputPeerFromPeer(entities, peerID)
+		if err != nil {
+			return nil, fmt.Errorf("resolve channel peer: %w", err)
+		}
+		inputChannel, ok := peer.ToInputChannel(inputPeer)
+		if !ok {
+			return nil, fmt.Errorf("peer %T is not an input channel", inputPeer)
+		}
+
+		messages, err = messageGetter.ChannelsGetMessages(ctx, &tg.ChannelsGetMessagesRequest{
+			Channel: inputChannel,
+			ID:      []tg.InputMessageClass{inputMessage},
+		})
+	} else {
+		messages, err = messageGetter.MessagesGetMessages(ctx, []tg.InputMessageClass{inputMessage})
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	return firstFullMessage(messages), nil
+}
+
+func firstFullMessage(messages tg.MessagesMessagesClass) *tg.Message {
+	if messages == nil {
+		return nil
+	}
+	modified, ok := messages.AsModified()
+	if !ok {
+		return nil
+	}
+
+	for _, messageClass := range modified.GetMessages() {
+		msg, ok := messageClass.(*tg.Message)
+		if ok && msg != nil {
+			return msg
+		}
+	}
+
+	return nil
+}
+
 func (c *Client) cachedSenderBot(userID int64) (bool, bool) {
 	c.senderBotMu.RLock()
 	defer c.senderBotMu.RUnlock()
@@ -598,6 +695,19 @@ func peerUserID(peer tg.PeerClass) int64 {
 		return 0
 	}
 	return user.UserID
+}
+
+func messageAuthorUserID(msg *tg.Message, fallbackOutgoingUserID int64) int64 {
+	if msg == nil {
+		return 0
+	}
+	if from, ok := msg.GetFromID(); ok {
+		return peerUserID(from)
+	}
+	if msg.Out {
+		return fallbackOutgoingUserID
+	}
+	return 0
 }
 
 func sendTextToMessagePeer(ctx context.Context, raw *tg.Client, entities tg.Entities, messageClass tg.MessageClass, text string) error {

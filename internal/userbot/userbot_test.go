@@ -67,10 +67,30 @@ func (f *fakeTelegramMessageSender) MessagesSendMessage(_ context.Context, reque
 	return &tg.Updates{}, f.err
 }
 
+type fakeTelegramMessageGetter struct {
+	messages        tg.MessagesMessagesClass
+	messagesErr     error
+	messagesIDs     [][]tg.InputMessageClass
+	channelMessages tg.MessagesMessagesClass
+	channelErr      error
+	channelRequests []*tg.ChannelsGetMessagesRequest
+}
+
+func (f *fakeTelegramMessageGetter) MessagesGetMessages(_ context.Context, id []tg.InputMessageClass) (tg.MessagesMessagesClass, error) {
+	f.messagesIDs = append(f.messagesIDs, id)
+	return f.messages, f.messagesErr
+}
+
+func (f *fakeTelegramMessageGetter) ChannelsGetMessages(_ context.Context, request *tg.ChannelsGetMessagesRequest) (tg.MessagesMessagesClass, error) {
+	f.channelRequests = append(f.channelRequests, request)
+	return f.channelMessages, f.channelErr
+}
+
 type fakeTelegramAPI struct {
 	fakeTelegramUserGetter
 	fakeTelegramMessageForwarder
 	fakeTelegramMessageSender
+	fakeTelegramMessageGetter
 }
 
 func TestOwnerCommandRecognition(t *testing.T) {
@@ -205,6 +225,11 @@ func TestShouldMirrorBotMessage(t *testing.T) {
 			want: false,
 		},
 		{
+			name: "bot reply to userbot ignored",
+			meta: messageMeta{chatType: "group", senderIsBot: true, hasOrderNumber: true, replyToUserbot: true, text: "M1776217307"},
+			want: false,
+		},
+		{
 			name: "private bot message ignored",
 			meta: messageMeta{chatType: "private", senderIsBot: true, hasOrderNumber: true, text: "M1776217307"},
 			want: false,
@@ -228,6 +253,133 @@ func TestShouldMirrorBotMessage(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestResolveReplyToUserbotDetectsOwnReplyTarget(t *testing.T) {
+	client := &Client{cfg: config.Config{MirrorBotMessages: true, UserbotOwnerID: 42}}
+	api := &fakeTelegramAPI{
+		fakeTelegramMessageGetter: fakeTelegramMessageGetter{
+			messages: &tg.MessagesMessages{
+				Messages: []tg.MessageClass{
+					messageFromUser(44, 42),
+				},
+			},
+		},
+	}
+	msg := botOrderReplyMessage(55, 44, &tg.PeerChat{ChatID: 200})
+	meta := client.extractMessageMeta(tg.Entities{
+		Users: map[int64]*tg.User{
+			100: {ID: 100, Bot: true},
+		},
+	}, msg)
+
+	if err := client.resolveReplyToUserbot(context.Background(), api, tg.Entities{}, msg, &meta); err != nil {
+		t.Fatalf("expected reply target lookup to succeed: %v", err)
+	}
+	if !meta.replyToUserbot {
+		t.Fatalf("expected reply target to be detected as userbot-authored")
+	}
+	if len(api.messagesIDs) != 1 {
+		t.Fatalf("expected one messages.getMessages lookup, got %d", len(api.messagesIDs))
+	}
+	inputID, ok := api.messagesIDs[0][0].(*tg.InputMessageID)
+	if !ok {
+		t.Fatalf("expected InputMessageID, got %T", api.messagesIDs[0][0])
+	}
+	if inputID.ID != 44 {
+		t.Fatalf("expected reply target message id 44, got %d", inputID.ID)
+	}
+	if len(api.channelRequests) != 0 {
+		t.Fatalf("expected no channel lookup, got %d", len(api.channelRequests))
+	}
+}
+
+func TestResolveReplyToUserbotLeavesHumanReplyTargetMirrorable(t *testing.T) {
+	client := &Client{cfg: config.Config{MirrorBotMessages: true, UserbotOwnerID: 42}}
+	api := &fakeTelegramAPI{
+		fakeTelegramMessageGetter: fakeTelegramMessageGetter{
+			messages: &tg.MessagesMessages{
+				Messages: []tg.MessageClass{
+					messageFromUser(44, 43),
+				},
+			},
+		},
+	}
+	msg := botOrderReplyMessage(55, 44, &tg.PeerChat{ChatID: 200})
+	meta := client.extractMessageMeta(tg.Entities{
+		Users: map[int64]*tg.User{
+			100: {ID: 100, Bot: true},
+		},
+	}, msg)
+
+	if err := client.resolveReplyToUserbot(context.Background(), api, tg.Entities{}, msg, &meta); err != nil {
+		t.Fatalf("expected reply target lookup to succeed: %v", err)
+	}
+	if meta.replyToUserbot {
+		t.Fatalf("expected human reply target not to be marked as userbot-authored")
+	}
+	if !client.shouldMirrorBotMessage(meta) {
+		t.Fatalf("expected bot reply to normal user message to remain mirrorable")
+	}
+}
+
+func TestResolveReplyToUserbotUsesChannelLookupForMegagroup(t *testing.T) {
+	client := &Client{cfg: config.Config{MirrorBotMessages: true, UserbotOwnerID: 42}}
+	api := &fakeTelegramAPI{
+		fakeTelegramMessageGetter: fakeTelegramMessageGetter{
+			channelMessages: &tg.MessagesMessages{
+				Messages: []tg.MessageClass{
+					messageFromUser(44, 42),
+				},
+			},
+		},
+	}
+	peerID := &tg.PeerChannel{ChannelID: 200}
+	msg := botOrderReplyMessage(55, 44, peerID)
+	entities := tg.Entities{
+		Users: map[int64]*tg.User{
+			100: {ID: 100, Bot: true},
+		},
+		Channels: map[int64]*tg.Channel{
+			200: {ID: 200, AccessHash: 123, Megagroup: true},
+		},
+	}
+	meta := client.extractMessageMeta(entities, msg)
+
+	if err := client.resolveReplyToUserbot(context.Background(), api, entities, msg, &meta); err != nil {
+		t.Fatalf("expected reply target lookup to succeed: %v", err)
+	}
+	if !meta.replyToUserbot {
+		t.Fatalf("expected channel reply target to be detected as userbot-authored")
+	}
+	if len(api.channelRequests) != 1 {
+		t.Fatalf("expected one channels.getMessages lookup, got %d", len(api.channelRequests))
+	}
+	if _, ok := api.channelRequests[0].Channel.(*tg.InputChannel); !ok {
+		t.Fatalf("expected InputChannel, got %T", api.channelRequests[0].Channel)
+	}
+	if len(api.messagesIDs) != 0 {
+		t.Fatalf("expected no normal message lookup, got %d", len(api.messagesIDs))
+	}
+}
+
+func messageFromUser(msgID int, userID int64) *tg.Message {
+	msg := &tg.Message{ID: msgID}
+	msg.SetFromID(&tg.PeerUser{UserID: userID})
+	return msg
+}
+
+func botOrderReplyMessage(msgID int, replyToMsgID int, peerID tg.PeerClass) *tg.Message {
+	replyHeader := &tg.MessageReplyHeader{}
+	replyHeader.SetReplyToMsgID(replyToMsgID)
+	msg := &tg.Message{
+		ID:      msgID,
+		PeerID:  peerID,
+		Message: "M1776217307",
+	}
+	msg.SetFromID(&tg.PeerUser{UserID: 100})
+	msg.SetReplyTo(replyHeader)
+	return msg
 }
 
 func TestHasOrderNumber(t *testing.T) {

@@ -39,6 +39,7 @@ Behavior:
 - Only mirrors messages where the sender is a Telegram bot.
 - Only mirrors group/supergroup messages.
 - Ignores your own outgoing messages, so the userbot does not mirror itself.
+- Ignores bot replies to messages authored by the configured userbot account, preventing duplicate reply chains.
 - Ignores old Telegram history from before the current process start.
 - Mirrors text replies as replies to the same original message.
 - Mirrors media messages by forwarding/copying them back into the group.

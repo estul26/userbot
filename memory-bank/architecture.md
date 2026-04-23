@@ -39,7 +39,7 @@
 - When enabled, incoming messages from Telegram bot accounts in groups/supergroups are reposted as the authenticated user in the same chat only if text/caption contains an order-number candidate.
 - The default order candidate regex is `\b[A-Za-z0-9][A-Za-z0-9_-]{9,}\b`, so candidates must be at least 10 characters; matched candidates must contain at least one digit and obvious date tokens are ignored.
 - Text mirrors preserve the original reply target when Telegram provides one; media mirrors are forwarded/copied back into the group.
-- Mirroring ignores historical messages, outgoing messages, private messages, human senders, messages without an order candidate, and empty text/media to reduce accidental loops.
+- Mirroring ignores historical messages, outgoing messages, private messages, human senders, bot replies to messages authored by the userbot account, messages without an order candidate, and empty text/media to reduce accidental loops.
 
 ## Shutdown Flow
 - Process listens for `SIGINT`/`SIGTERM`, cancels the userbot context, waits up to 10s for shutdown, then closes Mongo with a 5s timeout.
