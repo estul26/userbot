@@ -43,7 +43,7 @@ Behavior:
 - Ignores old Telegram history from before the current process start.
 - Mirrors text replies as replies to the same original message.
 - Mirrors media messages by forwarding/copying them back into the group.
-- Requires an order-number candidate in the text/caption. The default candidate pattern is `\b[A-Za-z0-9][A-Za-z0-9_-]{12,}\b`, meaning at least 13 characters, and the matched candidate must contain at least one digit.
+- Requires an order-number candidate in the text/caption. The default candidate pattern is `\b[A-Za-z0-9][A-Za-z0-9_-]{12,}\b`, meaning at least 13 characters, and the matched candidate must contain at least one digit. Date tokens and common USDT wallet address formats do not count as order candidates.
 
 For production, add a GitHub repository variable:
 

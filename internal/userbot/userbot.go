@@ -35,6 +35,8 @@ var (
 	defaultMirrorOrderPattern = regexp.MustCompile(config.DefaultMirrorOrderPattern)
 	dashDatePattern           = regexp.MustCompile(`^\d{4}-\d{1,2}-\d{1,2}$`)
 	compactDatePattern        = regexp.MustCompile(`^(19|20)\d{6}$`)
+	evmAddressPattern         = regexp.MustCompile(`^0x[0-9A-Fa-f]{40}$`)
+	tronAddressPattern        = regexp.MustCompile(`^T[1-9A-HJ-NP-Za-km-z]{33}$`)
 )
 
 type UserRegistrar interface {
@@ -531,7 +533,7 @@ func (c *Client) hasOrderNumber(text string) bool {
 	}
 
 	for _, candidate := range pattern.FindAllString(text, -1) {
-		if containsASCIIDigit(candidate) && !isLikelyDateToken(candidate) {
+		if containsASCIIDigit(candidate) && !isIgnoredOrderCandidate(candidate) {
 			return true
 		}
 	}
@@ -539,8 +541,16 @@ func (c *Client) hasOrderNumber(text string) bool {
 	return false
 }
 
+func isIgnoredOrderCandidate(value string) bool {
+	return isLikelyDateToken(value) || isLikelyUSDTAddress(value)
+}
+
 func isLikelyDateToken(value string) bool {
 	return dashDatePattern.MatchString(value) || compactDatePattern.MatchString(value)
+}
+
+func isLikelyUSDTAddress(value string) bool {
+	return evmAddressPattern.MatchString(value) || tronAddressPattern.MatchString(value)
 }
 
 func containsASCIIDigit(value string) bool {

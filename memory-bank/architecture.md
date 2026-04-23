@@ -37,7 +37,7 @@
 
 ## Bot Message Mirroring
 - When enabled, incoming messages from Telegram bot accounts in groups/supergroups are reposted as the authenticated user in the same chat only if text/caption contains an order-number candidate.
-- The default order candidate regex is `\b[A-Za-z0-9][A-Za-z0-9_-]{12,}\b`, so candidates must be at least 13 characters; matched candidates must contain at least one digit and obvious date tokens are ignored.
+- The default order candidate regex is `\b[A-Za-z0-9][A-Za-z0-9_-]{12,}\b`, so candidates must be at least 13 characters; matched candidates must contain at least one digit, and obvious date tokens plus common USDT wallet address formats are ignored.
 - Text mirrors preserve the original reply target when Telegram provides one; media mirrors are forwarded/copied back into the group.
 - Mirroring ignores historical messages, outgoing messages, private messages, human senders, bot replies to messages authored by the userbot account, messages without an order candidate, and empty text/media to reduce accidental loops.
 
