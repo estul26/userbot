@@ -196,7 +196,7 @@ func TestShouldMirrorBotMessage(t *testing.T) {
 	}{
 		{
 			name: "incoming bot order text in group",
-			meta: messageMeta{chatType: "group", senderIsBot: true, hasOrderNumber: true, text: "M1776217307"},
+			meta: messageMeta{chatType: "group", senderIsBot: true, hasOrderNumber: true, text: "M1776217307123"},
 			want: true,
 		},
 		{
@@ -206,7 +206,7 @@ func TestShouldMirrorBotMessage(t *testing.T) {
 		},
 		{
 			name: "feature disabled",
-			meta: messageMeta{chatType: "group", senderIsBot: true, hasOrderNumber: true, text: "M1776217307"},
+			meta: messageMeta{chatType: "group", senderIsBot: true, hasOrderNumber: true, text: "M1776217307123"},
 			want: false,
 		},
 		{
@@ -216,22 +216,22 @@ func TestShouldMirrorBotMessage(t *testing.T) {
 		},
 		{
 			name: "human message ignored",
-			meta: messageMeta{chatType: "group", hasOrderNumber: true, text: "M1776217307"},
+			meta: messageMeta{chatType: "group", hasOrderNumber: true, text: "M1776217307123"},
 			want: false,
 		},
 		{
 			name: "outgoing bot-like message ignored",
-			meta: messageMeta{chatType: "group", senderIsBot: true, hasOrderNumber: true, out: true, text: "M1776217307"},
+			meta: messageMeta{chatType: "group", senderIsBot: true, hasOrderNumber: true, out: true, text: "M1776217307123"},
 			want: false,
 		},
 		{
 			name: "bot reply to userbot ignored",
-			meta: messageMeta{chatType: "group", senderIsBot: true, hasOrderNumber: true, replyToUserbot: true, text: "M1776217307"},
+			meta: messageMeta{chatType: "group", senderIsBot: true, hasOrderNumber: true, replyToUserbot: true, text: "M1776217307123"},
 			want: false,
 		},
 		{
 			name: "private bot message ignored",
-			meta: messageMeta{chatType: "private", senderIsBot: true, hasOrderNumber: true, text: "M1776217307"},
+			meta: messageMeta{chatType: "private", senderIsBot: true, hasOrderNumber: true, text: "M1776217307123"},
 			want: false,
 		},
 		{
@@ -375,7 +375,7 @@ func botOrderReplyMessage(msgID int, replyToMsgID int, peerID tg.PeerClass) *tg.
 	msg := &tg.Message{
 		ID:      msgID,
 		PeerID:  peerID,
-		Message: "M1776217307",
+		Message: "M1776217307123",
 	}
 	msg.SetFromID(&tg.PeerUser{UserID: 100})
 	msg.SetReplyTo(replyHeader)
@@ -390,10 +390,10 @@ func TestHasOrderNumber(t *testing.T) {
 		text string
 		want bool
 	}{
-		{name: "long numeric order", text: "1776217307", want: true},
-		{name: "mixed order", text: "[M1776217307] 永顺", want: true},
-		{name: "dash order", text: "order A-1234567-Z ready", want: true},
-		{name: "nine character order ignored", text: "A12345678"},
+		{name: "long numeric order", text: "1776217307123", want: true},
+		{name: "mixed order", text: "[M1776217307123] 永顺", want: true},
+		{name: "dash order", text: "order A-123456789-Z ready", want: true},
+		{name: "twelve character order ignored", text: "A12345678901"},
 		{name: "short number ignored", text: "12345"},
 		{name: "price ignored", text: "6.83"},
 		{name: "date ignored", text: "2026-04-22"},
@@ -455,7 +455,7 @@ func TestExtractMessageMetaDetectsBotSender(t *testing.T) {
 	client := &Client{}
 	msg := &tg.Message{
 		PeerID:  &tg.PeerChat{ChatID: 200},
-		Message: "M1776217307",
+		Message: "M1776217307123",
 	}
 	msg.SetFromID(&tg.PeerUser{UserID: 100})
 
@@ -523,7 +523,7 @@ func TestResolveMessageSenderBotUsesInputUserFromMessage(t *testing.T) {
 	msg := &tg.Message{
 		ID:      55,
 		PeerID:  &tg.PeerChat{ChatID: 200},
-		Message: "M1776217307",
+		Message: "M1776217307123",
 	}
 	msg.SetFromID(&tg.PeerUser{UserID: 100})
 	meta := client.extractMessageMeta(tg.Entities{}, msg)
@@ -556,7 +556,7 @@ func TestResolveMessageSenderBotUsesCache(t *testing.T) {
 	client := &Client{cfg: config.Config{MirrorBotMessages: true}}
 	client.cacheSenderBot(100, true)
 	getter := &fakeTelegramUserGetter{}
-	meta := messageMeta{chatType: "group", userID: 100, hasOrderNumber: true, text: "M1776217307"}
+	meta := messageMeta{chatType: "group", userID: 100, hasOrderNumber: true, text: "M1776217307123"}
 
 	if err := client.resolveMessageSenderBot(context.Background(), getter, tg.Entities{}, &tg.Message{ID: 55}, &meta); err != nil {
 		t.Fatalf("expected cached sender lookup to succeed: %v", err)

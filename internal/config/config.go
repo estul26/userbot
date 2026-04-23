@@ -36,7 +36,7 @@ const (
 	DefaultAppEnv             = EnvProduction
 	DefaultLogLevel           = "info"
 	DefaultMirrorBotMessages  = false
-	DefaultMirrorOrderPattern = `\b[A-Za-z0-9][A-Za-z0-9_-]{9,}\b`
+	DefaultMirrorOrderPattern = `\b[A-Za-z0-9][A-Za-z0-9_-]{12,}\b`
 
 	// Recommended database names by environment.
 	DefaultMongoDBProd = "tg_bot"
