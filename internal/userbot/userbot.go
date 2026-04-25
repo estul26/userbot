@@ -453,13 +453,13 @@ func (c *Client) extractMessageMeta(entities tg.Entities, msg *tg.Message) messa
 		meta.chatID = peer.UserID
 	case *tg.PeerChat:
 		meta.chatType = "group"
-		meta.chatID = peer.ChatID
+		meta.chatID = canonicalBasicGroupID(peer.ChatID)
 		if chat := entities.Chats[peer.ChatID]; chat != nil {
 			meta.chatTitle = strings.TrimSpace(chat.Title)
 		}
 	case *tg.PeerChannel:
 		meta.chatType = "channel"
-		meta.chatID = peer.ChannelID
+		meta.chatID = canonicalChannelID(peer.ChannelID)
 		if channel := entities.Channels[peer.ChannelID]; channel != nil {
 			meta.chatTitle = strings.TrimSpace(channel.Title)
 			if channel.Megagroup {
@@ -471,6 +471,24 @@ func (c *Client) extractMessageMeta(entities tg.Entities, msg *tg.Message) messa
 	}
 
 	return meta
+}
+
+func canonicalBasicGroupID(chatID int64) int64 {
+	if chatID < 0 {
+		return chatID
+	}
+	return -chatID
+}
+
+func canonicalChannelID(channelID int64) int64 {
+	const channelPrefix = int64(1_000_000_000_000)
+	if channelID <= -channelPrefix {
+		return channelID
+	}
+	if channelID < 0 {
+		channelID = -channelID
+	}
+	return -(channelPrefix + channelID)
 }
 
 func (c *Client) shouldMirrorBotMessage(meta messageMeta) bool {

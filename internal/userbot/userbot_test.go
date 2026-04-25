@@ -472,8 +472,63 @@ func TestExtractMessageMetaDetectsBotSender(t *testing.T) {
 	if !meta.senderIsBot {
 		t.Fatalf("expected sender to be detected as bot")
 	}
-	if meta.chatType != "group" || meta.chatID != 200 || meta.userID != 100 {
+	if meta.chatType != "group" || meta.chatID != -200 || meta.userID != 100 {
 		t.Fatalf("unexpected metadata: %+v", meta)
+	}
+}
+
+func TestExtractMessageMetaUsesCanonicalGroupChatIDs(t *testing.T) {
+	client := &Client{}
+
+	tests := []struct {
+		name     string
+		peerID   tg.PeerClass
+		entities tg.Entities
+		wantID   int64
+		wantType string
+	}{
+		{
+			name:     "basic group",
+			peerID:   &tg.PeerChat{ChatID: 200},
+			wantID:   -200,
+			wantType: "group",
+		},
+		{
+			name:   "megagroup channel",
+			peerID: &tg.PeerChannel{ChannelID: 200},
+			entities: tg.Entities{
+				Channels: map[int64]*tg.Channel{
+					200: {ID: 200, Megagroup: true},
+				},
+			},
+			wantID:   -1000000000200,
+			wantType: "group",
+		},
+		{
+			name:   "broadcast channel",
+			peerID: &tg.PeerChannel{ChannelID: 300},
+			entities: tg.Entities{
+				Channels: map[int64]*tg.Channel{
+					300: {ID: 300},
+				},
+			},
+			wantID:   -1000000000300,
+			wantType: "channel",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			msg := &tg.Message{PeerID: tt.peerID}
+			meta := client.extractMessageMeta(tt.entities, msg)
+
+			if meta.chatID != tt.wantID {
+				t.Fatalf("expected chat id %d, got %d", tt.wantID, meta.chatID)
+			}
+			if meta.chatType != tt.wantType {
+				t.Fatalf("expected chat type %s, got %s", tt.wantType, meta.chatType)
+			}
+		})
 	}
 }
 
