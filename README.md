@@ -1,4 +1,4 @@
-# Telegram Userbot Foundation
+# Telegram Userbot Foundation 
 
 Go MTProto userbot foundation. It logs in as a Telegram user account with `gotd/td`, stores the MTProto session in an encrypted local file, tracks seen users/groups in MongoDB, and exposes owner-only self commands.
 
